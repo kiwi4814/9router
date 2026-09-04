@@ -44,7 +44,13 @@ for (const m of rows) {
   out.push(`        input: [${inputs.join(", ")}]`);
   out.push(`        contextWindow: ${ctx || 200000}`);
   out.push(`        maxTokens: ${maxOut || 32768}`);
-  out.push(`        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`);
+  // v1.2.5 — price the model from the live priceFactor (credit multiplier)
+  // forwarded by /v1/models; 0 stays "free", anything else shows the factor.
+  // Unit is a Qoder credit factor applied to input+output, used here as the
+  // per-1M cost so OMP stops labeling every model "free" — NOT a USD claim.
+  const factor = Number(caps.priceFactor);
+  const price = Number.isFinite(factor) && factor > 0 ? factor : 0;
+  out.push(`        cost: { input: ${price}, output: ${price}, cacheRead: 0, cacheWrite: 0 }`);
 }
 if (withLegacyAliases) {
   // Map pretty id -> legacy internal key for clients that still send old names
@@ -79,7 +85,9 @@ if (withLegacyAliases) {
       out.push(`        input: [${inputs.join(", ")}]`);
       out.push(`        contextWindow: ${ctx || 200000}`);
       out.push(`        maxTokens: ${maxOut || 32768}`);
-      out.push(`        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`);
+      const factor = Number(caps.priceFactor);
+      const price = Number.isFinite(factor) && factor > 0 ? factor : 0;
+      out.push(`        cost: { input: ${price}, output: ${price}, cacheRead: 0, cacheWrite: 0 }`);
     }
   }
 }

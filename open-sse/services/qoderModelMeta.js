@@ -274,6 +274,18 @@ export function qoderCapabilitiesForEntry(entry) {
   const maxOut = Number(entry?.max_output_tokens) || 0;
   if (maxOut > 0) caps.maxOutput = maxOut;
 
+  // v1.2.5 — forward Qoder's credit price factors (snake_case on the wire,
+  // camelCase aliases tolerated) so OpenAI-compatible clients / the OMP
+  // generator can surface real pricing instead of a hardcoded "free".
+  const rawPriceFactor = entry?.price_factor ?? entry?.priceFactor;
+  const priceFactor = rawPriceFactor === undefined || rawPriceFactor === null ? NaN : Number(rawPriceFactor);
+  if (Number.isFinite(priceFactor) && priceFactor >= 0) caps.priceFactor = priceFactor;
+  const rawOriginal = entry?.original_price_factor ?? entry?.originalPriceFactor;
+  const originalPriceFactor = rawOriginal === undefined || rawOriginal === null ? NaN : Number(rawOriginal);
+  if (Number.isFinite(originalPriceFactor) && originalPriceFactor >= 0) {
+    caps.originalPriceFactor = originalPriceFactor;
+  }
+
   const windows = availableContextWindows(entry);
   if (windows) caps.availableContextWindows = windows;
   const defaultWindow = defaultContextWindowTokens(entry);
