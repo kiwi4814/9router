@@ -139,6 +139,20 @@ describe("qoderCapabilitiesForEntry (only-known-facts)", () => {
     expect(caps.reasoning).toBeUndefined();
     expect(caps.contextWindow).toBeUndefined();
     expect(caps.thinkingCanDisable).toBeUndefined();
+    expect(caps.priceFactor).toBeUndefined();
+  });
+
+  it("forwards Qoder price factors when the catalog states them", () => {
+    const caps = qoderCapabilitiesForEntry({
+      key: "gfmodel",
+      display_name: "GLM-5.3-Flash",
+      price_factor: 0.05,
+      original_price_factor: 0.1,
+    });
+    expect(caps.priceFactor).toBe(0.05);
+    expect(caps.originalPriceFactor).toBe(0.1);
+    // camelCase aliases tolerated
+    expect(qoderCapabilitiesForEntry({ key: "m", priceFactor: 0.5 }).priceFactor).toBe(0.5);
   });
 });
 
