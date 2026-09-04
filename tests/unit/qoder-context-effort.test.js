@@ -240,9 +240,21 @@ describe("context_length passthrough", () => {
     });
   });
 
-  it("leaves parameters untouched when no overrides are sent", async () => {
+  it("defaults to the model's largest advertised window when no override is sent (v1.2)", async () => {
     const { payload } = await build();
-    expect(payload.parameters).toEqual({ max_tokens: 32000 });
+    expect(payload.parameters).toEqual({ max_tokens: 32000, context_length: 1000000 });
+  });
+
+  it("skips the default window when QODER_DEFAULT_MAX_CONTEXT=0 (v1 behavior)", async () => {
+    const prev = process.env.QODER_DEFAULT_MAX_CONTEXT;
+    process.env.QODER_DEFAULT_MAX_CONTEXT = "0";
+    try {
+      const { payload } = await build();
+      expect(payload.parameters).toEqual({ max_tokens: 32000 });
+    } finally {
+      if (prev === undefined) delete process.env.QODER_DEFAULT_MAX_CONTEXT;
+      else process.env.QODER_DEFAULT_MAX_CONTEXT = prev;
+    }
   });
 });
 
@@ -266,5 +278,37 @@ describe("stable record identity", () => {
     const b = await build({ body: { reasoning_effort: "max", context_length: 1000000 } });
     expect(a.payload.request_set_id).toBe(b.payload.request_set_id);
     expect(a.payload.chat_record_id).toBe(b.payload.chat_record_id);
+  });
+});
+
+describe("public model ids (v1.2)", () => {
+  it("resolves a pretty id (glm-5.3-flash) to the internal gfmodel config", async () => {
+    const credentials = makeCredentials();
+    const { payload } = await buildQoderRequestBody({
+      model: "qd/glm-5.3-flash",
+      body: { model: "qd/glm-5.3-flash", messages: [{ role: "user", content: "hi" }] },
+      credentials,
+      log: { warn: vi.fn(), error: vi.fn() },
+      proxyOptions: { fetch: mockFetchFor(gfmodelConfig) },
+    });
+    expect(payload.model_config.key).toBe("gfmodel");
+  });
+
+  it("still accepts legacy qd/gfmodel spelling", async () => {
+    const { payload } = await build();
+    expect(payload.model_config.key).toBe("gfmodel");
+    expect(payload.chat_context.extra.modelConfig.key).toBe("gfmodel");
+  });
+
+  it("internal catalog key is used for the wire model_config lookup", async () => {
+    const credentials = makeCredentials();
+    const result = await buildQoderRequestBody({
+      model: "glm-5.3-flash",
+      body: { model: "glm-5.3-flash", messages: [{ role: "user", content: "hi" }] },
+      credentials,
+      log: { warn: vi.fn(), error: vi.fn() },
+      proxyOptions: { fetch: mockFetchFor(gfmodelConfig) },
+    });
+    expect(result.qoderKey).toBe("gfmodel");
   });
 });

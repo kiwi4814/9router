@@ -23,6 +23,10 @@ import { createHash } from "crypto";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { buildCosyHeaders } from "../shared/qoder/cosy.js";
 import {
+  maxContextWindowTokens,
+  qoderCapabilitiesForEntry,
+} from "./qoderModelMeta.js";
+import {
   QODER_MODEL_LIST_URL,
   QODER_CHAT_BASE_ALT,
   QODER_JOB_TOKEN_EXCHANGE_URL,
@@ -256,8 +260,14 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null) {
     rawConfigs.set(key, entry);
     if (entry.enable === false) continue;
 
+    // v1.2 — attach the real per-model capability facts (windows, efforts,
+    // reasoning, VL) to each catalog row. The OpenAI /v1/models route maps
+    // the id to a pretty public id before advertising; rawConfigs stays
+    // keyed by the internal catalog key for the chat executor, and the
+    // dashboard keeps consuming internal ids unchanged.
     const display = entry.display_name || key;
-    const ctx = Number(entry.max_input_tokens) || 131_072;
+    const maxWindow = maxContextWindowTokens(entry);
+    const ctx = maxWindow > 0 ? maxWindow : (Number(entry.max_input_tokens) || 131_072);
     models.push({
       id: key,
       name: `${display}`,
@@ -266,6 +276,7 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null) {
       isReasoning: !!entry.is_reasoning,
       maxOutputTokens: Number(entry.max_output_tokens) || 0,
       description: entry.description || "",
+      capabilities: qoderCapabilitiesForEntry(entry),
     });
   }
 

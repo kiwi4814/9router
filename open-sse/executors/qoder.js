@@ -37,6 +37,25 @@ import {
   QODER_MODEL_MAP,
 } from "../shared/qoder/constants.js";
 import { getQoderModelConfig, resolveQoderModels, isQoderPat, resolveQoderCredentials } from "../services/qoderModels.js";
+import {
+  internalQoderKey,
+  contextWindowTokens,
+  maxContextWindowTokens,
+  supportedEfforts,
+  supportsDisabledThinking,
+} from "../services/qoderModelMeta.js";
+
+/**
+ * v1.2 — when the client does not pick a context window, default to the
+ * model's largest advertised window so the capability /v1/models advertises
+ * and the real upstream behavior match. Opt out per deployment with
+ * QODER_DEFAULT_MAX_CONTEXT=0|false|no|off.
+ */
+function defaultMaxContextEnabled() {
+  const raw = String(process.env.QODER_DEFAULT_MAX_CONTEXT ?? "").trim().toLowerCase();
+  // Default ON; only an explicit opt-out disables it.
+  return !["0", "false", "no", "off", "disable", "disabled"].includes(raw);
+}
 
 /**
  * Hoist role:"system" messages out of the messages array (Qoder rejects
@@ -135,73 +154,19 @@ function truncate(s, n) {
   return s && s.length > n ? `${s.slice(0, n)}...` : s || "";
 }
 
-// --- v1.1 helpers: reasoning-effort / context-window passthrough -----------
-// The Qoder wire accepts `reasoning_effort`, `enable_thinking` and
-// `context_length` inside `parameters` (same fields the official qodercli
-// sends). The catalog entry for a model advertises which values are legal
-// (thinking_config.enabled.efforts and context_config token counts), so we
-// forward client overrides only when the upstream model actually supports
-// them — otherwise the platform default applies.
-function supportedEfforts(modelConfig) {
-  const result = new Set();
+// v1.1/v1.2 catalog helpers (supportedEfforts, supportsDisabledThinking,
+// contextWindowTokens, internalQoderKey) live in qoderModelMeta.js so the
+// executor and the /v1/models live resolver share one implementation.
 
-  // Official Qoder SDK metadata carries efforts either as a top-level
-  // `model["efforts"]` list or as thinking_config.enabled.efforts dict.
-  if (Array.isArray(modelConfig?.efforts)) {
-    for (const value of modelConfig.efforts) {
-      if (typeof value === "string" && value.trim()) {
-        result.add(value.trim().toLowerCase());
-      }
-    }
-  }
-
-  const tc = modelConfig?.thinking_config ?? modelConfig?.thinkingConfig;
-  const configured = tc?.enabled?.efforts;
-  if (configured && !Array.isArray(configured) && typeof configured === "object") {
-    for (const value of Object.keys(configured)) {
-      result.add(value.trim().toLowerCase());
-    }
-  }
-
-  return result;
-}
-
-function supportsDisabledThinking(modelConfig) {
-  const tc = modelConfig?.thinking_config ?? modelConfig?.thinkingConfig;
-  if (tc?.disabled && typeof tc.disabled === "object") return true;
-  return !!(
-    modelConfig?.supports_disabled ??
-    modelConfig?.supportsDisabled
-  );
-}
-
-function contextWindowTokens(modelConfig) {
-  const windows = new Set();
-  const add = (v) => {
-    const n = Number(v);
-    if (Number.isFinite(n) && n > 0) windows.add(n);
-  };
-  const cc = modelConfig?.context_config ?? modelConfig?.contextConfig;
-  if (Array.isArray(modelConfig?.available_context_windows)) {
-    for (const w of modelConfig.available_context_windows) add(w);
-  }
-  if (Array.isArray(modelConfig?.availableContextWindows)) {
-    for (const w of modelConfig.availableContextWindows) add(w);
-  }
-  if (cc && typeof cc === "object") {
-    for (const key of Object.keys(cc)) {
-      const bucket = cc[key];
-      if (bucket && typeof bucket === "object") add(bucket.token_count);
-    }
-  }
-  return windows;
-}
 
 /**
  * Map the OpenAI-style request body into the exact shape Qoder expects.
  */
 async function buildQoderRequestBody({ model, body, credentials, log, proxyOptions, signal }) {
-  const qoderKey = String(model || "").replace(/^qoder\//, "");
+  // Accept pretty public ids (qd/glm-5.3-flash), legacy internal keys
+  // (qd/gfmodel) and qoder/-prefixed spellings; always resolve to the
+  // internal catalog key the model_config lookup needs.
+  const qoderKey = internalQoderKey(model);
   
   // Fetch model config from dynamic API instead of relying on static QODER_MODEL_MAP.
   // This allows support for new Qoder models (e.g., qmodel_latest) without code changes.
@@ -277,6 +242,15 @@ async function buildQoderRequestBody({ model, body, credentials, log, proxyOptio
       );
     }
     parameters.context_length = ctx;
+  }
+
+  // v1.2 — client sent no context override: default to the model's largest
+  // advertised window so advertised capability == actual behavior. Skipped
+  // when the catalog advertises no windows (platform default applies) or
+  // when QODER_DEFAULT_MAX_CONTEXT opts out.
+  if (parameters.context_length === undefined && defaultMaxContextEnabled()) {
+    const maxWindow = maxContextWindowTokens(modelConfig);
+    if (maxWindow > 0) parameters.context_length = maxWindow;
   }
 
   const lastUser = lastUserText(messages);
