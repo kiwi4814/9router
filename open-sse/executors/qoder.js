@@ -225,6 +225,43 @@ function isBillingBlock(inner) {
   // Match: {"code":"112",...}, {"code":"10605",...}, or pricingUrl field
   return /\"code\"\s*:\s*\"(112|10605)\"/.test(inner) || lowerMsg.includes("pricingurl");
 }
+/**
+ * Check if an error message represents a queue throttle (10605 / isQueued)
+ * that should be retried, as opposed to a hard billing exhaustion (112 / pricingUrl).
+ */
+function isQueueBlock(inner) {
+  if (!inner || typeof inner !== "string") return false;
+  // Qoder may nest JSON strings several levels deep. Normalize escaped quotes,
+  // then match only the two explicit queue signals. Do not treat the mere
+  // presence of an `isQueued` field (including `false`) as retriable.
+  const normalized = inner.replace(/\\+"/g, '"');
+  return (
+    /"code"\s*:\s*"?10605"?/.test(normalized) ||
+    /"isQueued"\s*:\s*true\b/i.test(normalized)
+  );
+}
+
+function abortableSleep(ms, signal) {
+  if (signal?.aborted) {
+    const err = signal.reason || new Error("Request aborted");
+    err.name = "AbortError";
+    return Promise.reject(err);
+  }
+  return new Promise((resolve, reject) => {
+    let timer;
+    const onAbort = () => {
+      clearTimeout(timer);
+      const err = signal?.reason || new Error("Request aborted");
+      err.name = "AbortError";
+      reject(err);
+    };
+    timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 /**
  * Peek the first SSE frame to detect billing errors before piping.
@@ -495,72 +532,138 @@ export class QoderExecutor extends BaseExecutor {
       );
       return { response: fakeResp, url, headers: {}, transformedBody: body };
     }
+    const maxAttempts = Math.max(1, Number(process.env.QODER_QUEUE_MAX_ATTEMPTS) || 15);
+    const baseDelayMs = Math.max(100, Number(process.env.QODER_QUEUE_BASE_DELAY_MS) || 5000);
+    const maxDelayMs = Math.max(baseDelayMs, Number(process.env.QODER_QUEUE_MAX_DELAY_MS) || 60000);
 
-    const plainBody = Buffer.from(JSON.stringify(payload), "utf8");
-    const encodedBodyStr = qoderEncodeBody(plainBody);
-    const encodedBodyBuf = Buffer.from(encodedBodyStr, "latin1");
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (signal?.aborted) {
+        const err = signal.reason || new Error("Request aborted");
+        err.name = "AbortError";
+        throw err;
+      }
 
-    let cosyHeaders;
-    try {
-      cosyHeaders = buildCosyHeaders(
-        encodedBodyBuf,
-        url,
-        {
-          userId: psd.userId,
-          authToken: credentials.accessToken,
-          name: credentials.displayName || "",
-          email: credentials.email || "",
-          machineId: psd.machineId || "",
-        },
-      );
-    } catch (err) {
-      // cosy.js throws synchronously on missing userId/authToken — surface
-      // as 401 so chatCore prompts re-auth instead of returning a 500.
-      const fakeResp = new Response(
-        JSON.stringify({ error: { message: `qoder cosy signing failed: ${err.message}` } }),
-        { status: 401, headers: { "Content-Type": "application/json" } },
-      );
-      return { response: fakeResp, url, headers: {}, transformedBody: body };
+      if (attempt > 1) {
+        // Regenerate request_id, request_set_id, chat_record_id, and business ID on retry
+        payload.request_id = uuidv4();
+        payload.request_set_id = uuidv4();
+        payload.chat_record_id = uuidv4();
+        payload.is_retry = true;
+        if (payload.business) {
+          payload.business = {
+            ...payload.business,
+            id: uuidv4(),
+            begin_at: Date.now(),
+          };
+        }
+      }
+
+      const plainBody = Buffer.from(JSON.stringify(payload), "utf8");
+      const encodedBodyStr = qoderEncodeBody(plainBody);
+      const encodedBodyBuf = Buffer.from(encodedBodyStr, "latin1");
+
+      let cosyHeaders;
+      try {
+        cosyHeaders = buildCosyHeaders(
+          encodedBodyBuf,
+          url,
+          {
+            userId: psd.userId,
+            authToken: credentials.accessToken,
+            name: credentials.displayName || "",
+            email: credentials.email || "",
+            machineId: psd.machineId || "",
+          },
+        );
+      } catch (err) {
+        // cosy.js throws synchronously on missing userId/authToken — surface
+        // as 401 so chatCore prompts re-auth instead of returning a 500.
+        const fakeResp = new Response(
+          JSON.stringify({ error: { message: `qoder cosy signing failed: ${err.message}` } }),
+          { status: 401, headers: { "Content-Type": "application/json" } },
+        );
+        return { response: fakeResp, url, headers: {}, transformedBody: body };
+      }
+
+      const modelSource = (payload.model_config && payload.model_config.source) || "system";
+      const headers = {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        "Cache-Control": "no-cache",
+        "X-Model-Key": qoderKey,
+        "X-Model-Source": modelSource,
+        // gzip triggers signature validation on Qoder's CDN; force identity.
+        "Accept-Encoding": "identity",
+        ...cosyHeaders,
+      };
+
+      // Abort if upstream doesn't return response headers within connect timeout.
+      const timeoutMs = this.config?.timeoutMs || FETCH_CONNECT_TIMEOUT_MS;
+      const connectCtrl = new AbortController();
+      const connectTimer = setTimeout(() => connectCtrl.abort(new Error("fetch connect timeout")), timeoutMs);
+      const mergedSignal = signal ? AbortSignal.any([signal, connectCtrl.signal]) : connectCtrl.signal;
+
+      let response;
+      try {
+        response = await proxyAwareFetch(
+          url,
+          { method: "POST", headers, body: encodedBodyBuf, signal: mergedSignal },
+          proxyOptions,
+        );
+      } finally {
+        // Queue retry is intentionally limited to explicit Qoder queue signals
+        // below. DNS/TLS/proxy/configuration failures must fail fast instead of
+        // being hidden behind up to 15 long retries.
+        clearTimeout(connectTimer);
+      }
+
+      // Case 1: HTTP 403 with queue block (isQueued: true or code 10605)
+      if (response.status === 403) {
+        let errBody = "";
+        try {
+          errBody = await response.clone().text();
+        } catch {}
+        if (isQueueBlock(errBody)) {
+          if (attempt < maxAttempts) {
+            const delay = Math.min(baseDelayMs * Math.pow(1.5, attempt - 1), maxDelayMs);
+            log?.warn?.("QODER", `Queue throttled (HTTP 403), attempt ${attempt}/${maxAttempts}, retrying in ${delay}ms...`);
+            await abortableSleep(delay, signal);
+            continue;
+          }
+          return { response, url, headers, transformedBody: payload };
+        }
+        // HTTP 403 hard error (not queue throttle) — do not retry
+        return { response, url, headers, transformedBody: payload };
+      }
+
+      if (!response.ok) {
+        // Pass non-403 error response through unchanged so chatCore can capture it.
+        return { response, url, headers, transformedBody: payload };
+      }
+
+      // Case 2: HTTP 200 with first SSE frame containing status 403 + queue signature
+      const wrapped = await wrapQoderSSE(response, `qoder/${qoderKey}`);
+      if (wrapped.status === 403) {
+        let errBody = "";
+        try {
+          errBody = await wrapped.clone().text();
+        } catch {}
+        if (isQueueBlock(errBody)) {
+          if (attempt < maxAttempts) {
+            const delay = Math.min(baseDelayMs * Math.pow(1.5, attempt - 1), maxDelayMs);
+            log?.warn?.("QODER", `Queue throttled (SSE first-frame 403), attempt ${attempt}/${maxAttempts}, retrying in ${delay}ms...`);
+            await abortableSleep(delay, signal);
+            continue;
+          }
+          return { response: wrapped, url, headers, transformedBody: payload };
+        }
+        // Hard billing error on SSE (code 112, pricingUrl) — do not retry
+        return { response: wrapped, url, headers, transformedBody: payload };
+      }
+
+      return { response: wrapped, url, headers, transformedBody: payload };
     }
-
-    const modelSource = (payload.model_config && payload.model_config.source) || "system";
-    const headers = {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-      "Cache-Control": "no-cache",
-      "X-Model-Key": qoderKey,
-      "X-Model-Source": modelSource,
-      // gzip triggers signature validation on Qoder's CDN; force identity.
-      "Accept-Encoding": "identity",
-      ...cosyHeaders,
-    };
-
-    // Abort if upstream doesn't return response headers within connect timeout.
-    const timeoutMs = this.config?.timeoutMs || FETCH_CONNECT_TIMEOUT_MS;
-    const connectCtrl = new AbortController();
-    const connectTimer = setTimeout(() => connectCtrl.abort(new Error("fetch connect timeout")), timeoutMs);
-    const mergedSignal = signal ? AbortSignal.any([signal, connectCtrl.signal]) : connectCtrl.signal;
-
-    let response;
-    try {
-      response = await proxyAwareFetch(
-        url,
-        { method: "POST", headers, body: encodedBodyBuf, signal: mergedSignal },
-        proxyOptions,
-      );
-    } finally {
-      clearTimeout(connectTimer);
-    }
-
-    if (!response.ok) {
-      // Pass error response through unchanged so chatCore can capture it.
-      return { response, url, headers, transformedBody: payload };
-    }
-
-    const wrapped = await wrapQoderSSE(response, `qoder/${qoderKey}`);
-    return { response: wrapped, url, headers, transformedBody: payload };
   }
-
   // Qoder device tokens don't refresh through OAuth — the upstream returns
   // 403 for our flow. Surfacing failure via 401-on-chat is enough; the
   // dashboard tells users to re-login when their token expires (~30 days).
@@ -582,4 +685,6 @@ export const __test__ = {
   wrapQoderSSE,
   buildQoderRequestBody,
   isBillingBlock,
+  isQueueBlock,
+  abortableSleep,
 };

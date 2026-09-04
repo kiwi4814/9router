@@ -1,3 +1,25 @@
+import {
+  QODER_OPENAPI_BASE,
+  QODER_CENTER_BASE,
+  QODER_CHAT_BASE,
+  QODER_CHAT_URL,
+  QODER_QUOTA_USAGE_URL,
+  QODER_DEVICE_TOKEN_URL,
+  QODER_REFRESH_TOKEN_URL,
+  QODER_USERINFO_URL,
+  QODER_LOGIN_URL,
+} from "../../shared/qoder/constants.js";
+
+function qoderEnvMs(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return fallback;
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+const QODER_STREAM_TIMEOUT_MS = qoderEnvMs("QODER_STREAM_TIMEOUT_MS", 600000);
+const QODER_STALL_TIMEOUT_MS = qoderEnvMs("QODER_STALL_TIMEOUT_MS", QODER_STREAM_TIMEOUT_MS);
+
 export default {
   id: "qoder",
   priority: 30,
@@ -17,12 +39,12 @@ export default {
   hasOAuth: true,
   authHint: "Personal Access Token (pt-...) từ https://qoder.com/account/integrations",
   transport: {
-    baseUrl: "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation",
+    baseUrl: QODER_CHAT_URL,
     headers: {},
-    timeoutMs: 120000,
-    stallTimeoutMs: 120000,
+    timeoutMs: QODER_STREAM_TIMEOUT_MS,
+    stallTimeoutMs: QODER_STALL_TIMEOUT_MS,
     usage: {
-      url: "https://openapi.qoder.sh/api/v2/quota/usage",
+      url: QODER_QUOTA_USAGE_URL,
     },
   },
   models: [
@@ -41,14 +63,14 @@ export default {
     { id: "mmodel", name: "MiniMax-M3" },
   ],
   oauth: {
-    openApiBaseUrl: "https://openapi.qoder.sh",
-    centerBaseUrl: "https://center.qoder.sh",
-    chatBaseUrl: "https://api3.qoder.sh",
-    deviceTokenUrl: "https://openapi.qoder.sh/api/v1/deviceToken/poll",
-    refreshUrl: "https://center.qoder.sh/algo/api/v3/user/refresh_token",
-    userInfoUrl: "https://openapi.qoder.sh/api/v1/userinfo",
-    quotaUsageUrl: "https://openapi.qoder.sh/api/v2/quota/usage",
-    loginUrl: "https://qoder.com/device/selectAccounts",
+    openApiBaseUrl: QODER_OPENAPI_BASE,
+    centerBaseUrl: QODER_CENTER_BASE,
+    chatBaseUrl: QODER_CHAT_BASE,
+    deviceTokenUrl: QODER_DEVICE_TOKEN_URL,
+    refreshUrl: QODER_REFRESH_TOKEN_URL,
+    userInfoUrl: QODER_USERINFO_URL,
+    quotaUsageUrl: QODER_QUOTA_USAGE_URL,
+    loginUrl: QODER_LOGIN_URL,
   },
   features: {
     usage: true,

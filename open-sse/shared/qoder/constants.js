@@ -8,12 +8,48 @@
  *   qoder.com/device   - browser landing page for device authorization
  */
 
-export const QODER_OPENAPI_BASE = "https://openapi.qoder.sh";
-export const QODER_CENTER_BASE = "https://center.qoder.sh";
-export const QODER_CHAT_BASE = "https://api3.qoder.sh";
+function qoderBaseFromEnv(name, fallback) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`${name} must be an absolute https URL`);
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error(`${name} must use https`);
+  }
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error(`${name} must not contain credentials, query, or fragment`);
+  }
+  if (parsed.pathname && parsed.pathname !== "/") {
+    throw new Error(`${name} must be an origin without a path`);
+  }
+  return parsed.origin;
+}
+
+// Self-hosted/VPC deployments can override Qoder network origins without
+// changing the provider implementation. Defaults preserve upstream behavior.
+export const QODER_OPENAPI_BASE = qoderBaseFromEnv(
+  "QODER_OPENAPI_BASE",
+  "https://openapi.qoder.sh",
+);
+export const QODER_CENTER_BASE = qoderBaseFromEnv(
+  "QODER_CENTER_BASE",
+  "https://center.qoder.sh",
+);
+export const QODER_CHAT_BASE = qoderBaseFromEnv(
+  "QODER_CHAT_BASE",
+  "https://api3.qoder.sh",
+);
 // Job-token (jt-...) traffic is rejected by api3 with "Login expired" (403);
 // the official qodercli serves it from api2 instead.
-export const QODER_CHAT_BASE_ALT = "https://api2.qoder.sh";
+export const QODER_CHAT_BASE_ALT = qoderBaseFromEnv(
+  "QODER_CHAT_BASE_ALT",
+  "https://api2.qoder.sh",
+);
 
 export const QODER_LOGIN_URL = "https://qoder.com/device/selectAccounts";
 

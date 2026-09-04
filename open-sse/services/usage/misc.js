@@ -237,7 +237,9 @@ export async function getQoderUsage(accessToken, proxyOptions = null) {
         resetAt,
       },
       organization: {
-        total: Number(orgQuota.total) || 0,
+        // Enterprise/VPC returns the resource-package ceiling as `cap`.
+        // Global/older responses may still use `total`, so accept both.
+        total: Number(orgQuota.total ?? orgQuota.cap) || 0,
         used: Number(orgQuota.used) || 0,
         remaining: Number(orgQuota.remaining) || 0,
         unit: orgQuota.unit || "credits",

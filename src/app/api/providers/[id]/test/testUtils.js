@@ -18,6 +18,10 @@ import {
   KIMCHI_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
+import {
+  QODER_USERINFO_URL,
+  QODER_JOB_TOKEN_EXCHANGE_URL,
+} from "open-sse/shared/qoder/constants.js";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -67,7 +71,7 @@ const OAUTH_TEST_CONFIG = {
     // refreshable: false because the device-flow refresh endpoint returns
     // 403 for our flow (users re-login when expired). No checkExpiry —
     // we want the actual URL probe to run so revoked tokens surface.
-    url: "https://openapi.qoder.sh/api/v1/userinfo",
+    url: QODER_USERINFO_URL,
     method: "GET",
     authHeader: "Authorization",
     authPrefix: "Bearer ",
@@ -779,7 +783,7 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         const raw = connection.apiKey || "";
         const pat = raw.startsWith("pt-") ? raw : `pt-${raw}`;
         const exRes = await fetchWithConnectionProxy(
-          "https://openapi.qoder.sh/api/v1/jobToken/exchange",
+          QODER_JOB_TOKEN_EXCHANGE_URL,
           {
             method: "POST",
             headers: {
