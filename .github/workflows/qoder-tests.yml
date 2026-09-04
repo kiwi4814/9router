@@ -4,6 +4,8 @@ on:
   push:
     branches: [feat/qodercn-vpc-selfuse]
   pull_request:
+  # Manual dispatch so an infra-flaky run can be re-triggered without code churn.
+  workflow_dispatch:
 
 # Secret-free CI: runs only the public Qoder/fallback unit tests and the
 # Next.js build. NO Personal Access Tokens, NO live VPC traffic — acceptance
