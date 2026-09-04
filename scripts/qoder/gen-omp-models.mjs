@@ -12,7 +12,8 @@
  *     baseUrl defaults to http://127.0.0.1:20127/v1
  * Prints YAML `models:` entries to paste under the 9router provider in
  * ~/.omp/agent/models.yml. Values are read from the server's live catalog
- * advertisement (windows / efforts / vision), not hardcoded.
+ * advertisement (windows / efforts / vision / Qoder credit multipliers),
+ * not hardcoded.
  */
 const args = process.argv.slice(2);
 const withLegacyAliases = args.includes("--legacy-aliases");
@@ -29,6 +30,25 @@ if (rows.length === 0) {
 
 rows.sort((a, b) => a.id.localeCompare(b.id));
 
+function optionalFactor(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function modelNameWithFactor(modelId, caps) {
+  const base = String(modelId).replace(/^qd\//, "");
+  const factor = optionalFactor(caps?.priceFactor);
+  if (factor === null) return base;
+  if (factor === 0) return `${base} · free`;
+
+  const original = optionalFactor(caps?.originalPriceFactor);
+  if (original !== null && original > 0 && original !== factor) {
+    return `${base} · ${factor}× (orig ${original}×)`;
+  }
+  return `${base} · ${factor}×`;
+}
+
 const out = [];
 for (const m of rows) {
   const caps = m.capabilities || {};
@@ -38,19 +58,18 @@ for (const m of rows) {
   const efforts = Array.isArray(caps.reasoningEfforts) && caps.reasoningEfforts.length > 0;
   const canThink = caps.reasoning === true || efforts;
   out.push(`      - id: ${m.id}`);
-  out.push(`        name: ${m.id.replace(/^qd\//, "")}`);
+  out.push(`        name: ${modelNameWithFactor(m.id, caps)}`);
   out.push(`        reasoning: ${canThink ? "true" : "false"}`);
   out.push(`        supportsTools: ${caps.tools !== false ? "true" : "false"}`);
   out.push(`        input: [${inputs.join(", ")}]`);
   out.push(`        contextWindow: ${ctx || 200000}`);
   out.push(`        maxTokens: ${maxOut || 32768}`);
-  // v1.2.5 — price the model from the live priceFactor (credit multiplier)
-  // forwarded by /v1/models; 0 stays "free", anything else shows the factor.
-  // Unit is a Qoder credit factor applied to input+output, used here as the
-  // per-1M cost so OMP stops labeling every model "free" — NOT a USD claim.
-  const factor = Number(caps.priceFactor);
-  const price = Number.isFinite(factor) && factor > 0 ? factor : 0;
-  out.push(`        cost: { input: ${price}, output: ${price}, cacheRead: 0, cacheWrite: 0 }`);
+  // Qoder priceFactor is a relative Credits multiplier, NOT a per-million-token
+  // currency rate. OMP's `cost` field is a per-1M-token rate card and is used
+  // for monetary/session-cost accounting, so keep it zero to avoid fabricating
+  // USD-like costs. The real multiplier is displayed in `name` above and stays
+  // available structurally as capabilities.priceFactor/originalPriceFactor.
+  out.push(`        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`);
 }
 if (withLegacyAliases) {
   // Map pretty id -> legacy internal key for clients that still send old names
@@ -79,15 +98,13 @@ if (withLegacyAliases) {
       const efforts = Array.isArray(caps.reasoningEfforts) && caps.reasoningEfforts.length > 0;
       const canThink = caps.reasoning === true || efforts;
       out.push(`      - id: qd/${legacy}`);
-      out.push(`        name: ${legacy}`);
+      out.push(`        name: ${modelNameWithFactor(`qd/${legacy}`, caps)}`);
       out.push(`        reasoning: ${canThink ? "true" : "false"}`);
       out.push(`        supportsTools: ${caps.tools !== false ? "true" : "false"}`);
       out.push(`        input: [${inputs.join(", ")}]`);
       out.push(`        contextWindow: ${ctx || 200000}`);
       out.push(`        maxTokens: ${maxOut || 32768}`);
-      const factor = Number(caps.priceFactor);
-      const price = Number.isFinite(factor) && factor > 0 ? factor : 0;
-      out.push(`        cost: { input: ${price}, output: ${price}, cacheRead: 0, cacheWrite: 0 }`);
+      out.push(`        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`);
     }
   }
 }
