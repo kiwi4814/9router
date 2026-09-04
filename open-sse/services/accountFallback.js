@@ -14,42 +14,62 @@ export function getQuotaCooldown(backoffLevel = 0) {
 
 /**
  * Check if error should trigger account fallback (switch to next account)
- * Config-driven: matches ERROR_RULES top-to-bottom (text rules first, then status)
+ * Config-driven ordering:
+ *   1. text rules (highest priority; some providers encode retryable/account
+ *      conditions in the body even when they return HTTP 400),
+ *   2. ordinary HTTP 400 client errors (never rotate accounts),
+ *   3. status rules,
+ *   4. transient fallback for unmatched errors.
  * @param {number} status - HTTP status code
  * @param {string} errorText - Error message text
  * @param {number} backoffLevel - Current backoff level for exponential backoff
  * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number }}
  */
 export function checkFallbackError(status, errorText, backoffLevel = 0) {
-  // HTTP 400 Bad Request represents a client-side parameter error (e.g. invalid
-  // context_length, unsupported options). It is not a provider or account outage,
-  // so do not mark the account unavailable or trigger account fallback.
-  if (status === 400) {
-    return { shouldFallback: false, cooldownMs: 0 };
-  }
-
   const lowerError = errorText
     ? (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase()
     : "";
 
+  // Text-based rules intentionally stay above generic HTTP status handling.
+  // A provider may return HTTP 400 while the body still carries a retryable
+  // account-level condition such as rate-limit/quota/capacity. Preserve that
+  // established behavior before treating an otherwise-unmatched 400 as a
+  // client parameter error.
   for (const rule of ERROR_RULES) {
-    // Text-based rule: match substring in error message
-    if (rule.text && lowerError && lowerError.includes(rule.text)) {
-      if (rule.backoff) {
-        const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
-        return { shouldFallback: true, cooldownMs: getQuotaCooldown(newLevel), newBackoffLevel: newLevel };
-      }
-      return { shouldFallback: true, cooldownMs: rule.cooldownMs };
-    }
+    if (!rule.text || !lowerError || !lowerError.includes(rule.text)) continue;
 
-    // Status-based rule: match HTTP status code
-    if (rule.status && rule.status === status) {
-      if (rule.backoff) {
-        const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
-        return { shouldFallback: true, cooldownMs: getQuotaCooldown(newLevel), newBackoffLevel: newLevel };
-      }
-      return { shouldFallback: true, cooldownMs: rule.cooldownMs };
+    if (rule.backoff) {
+      const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
+      return {
+        shouldFallback: true,
+        cooldownMs: getQuotaCooldown(newLevel),
+        newBackoffLevel: newLevel,
+      };
     }
+    return { shouldFallback: true, cooldownMs: rule.cooldownMs };
+  }
+
+  // An ordinary HTTP 400 represents a client-side parameter error (for
+  // example an unsupported context_length). It is not a provider/account
+  // outage, so surface it directly and do not rotate or lock the connection.
+  if (status === 400) {
+    return { shouldFallback: false, cooldownMs: 0 };
+  }
+
+  // Status-based rules are evaluated after text rules and the generic 400
+  // exception, preserving the original priority contract.
+  for (const rule of ERROR_RULES) {
+    if (!rule.status || rule.status !== status) continue;
+
+    if (rule.backoff) {
+      const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
+      return {
+        shouldFallback: true,
+        cooldownMs: getQuotaCooldown(newLevel),
+        newBackoffLevel: newLevel,
+      };
+    }
+    return { shouldFallback: true, cooldownMs: rule.cooldownMs };
   }
 
   // Default: transient cooldown for any unmatched error
@@ -74,7 +94,7 @@ export function getUnavailableUntil(cooldownMs) {
 /**
  * Get the earliest rateLimitedUntil from a list of accounts
  * @param {Array} accounts - Array of account objects with rateLimitedUntil
- * @returns {string|null} Earliest rateLimitedUntil ISO string, or null
+ * @returns {string|null} Earliest rateLimitedUntil ISO string or null
  */
 export function getEarliestRateLimitedUntil(accounts) {
   let earliest = null;
