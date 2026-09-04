@@ -124,6 +124,51 @@ function truncate(s, n) {
   return s && s.length > n ? `${s.slice(0, n)}...` : s || "";
 }
 
+// --- v1.1 helpers: reasoning-effort / context-window passthrough -----------
+// The Qoder wire accepts `reasoning_effort`, `enable_thinking` and
+// `context_length` inside `parameters` (same fields the official qodercli
+// sends). The catalog entry for a model advertises which values are legal
+// (thinking_config.enabled.efforts and context_config token counts), so we
+// forward client overrides only when the upstream model actually supports
+// them — otherwise the platform default applies.
+function supportedEfforts(modelConfig) {
+  const tc = modelConfig?.thinking_config ?? modelConfig?.thinkingConfig;
+  const efforts = tc?.enabled?.efforts;
+  if (efforts && typeof efforts === "object") return new Set(Object.keys(efforts));
+  return new Set();
+}
+
+function supportsDisabledThinking(modelConfig) {
+  const tc = modelConfig?.thinking_config ?? modelConfig?.thinkingConfig;
+  if (tc?.disabled && typeof tc.disabled === "object") return true;
+  return !!(
+    modelConfig?.supports_disabled ??
+    modelConfig?.supportsDisabled
+  );
+}
+
+function contextWindowTokens(modelConfig) {
+  const windows = new Set();
+  const add = (v) => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) windows.add(n);
+  };
+  const cc = modelConfig?.context_config ?? modelConfig?.contextConfig;
+  if (Array.isArray(modelConfig?.available_context_windows)) {
+    for (const w of modelConfig.available_context_windows) add(w);
+  }
+  if (Array.isArray(modelConfig?.availableContextWindows)) {
+    for (const w of modelConfig.availableContextWindows) add(w);
+  }
+  if (cc && typeof cc === "object") {
+    for (const key of Object.keys(cc)) {
+      const bucket = cc[key];
+      if (bucket && typeof bucket === "object") add(bucket.token_count);
+    }
+  }
+  return windows;
+}
+
 /**
  * Map the OpenAI-style request body into the exact shape Qoder expects.
  */
@@ -160,6 +205,42 @@ async function buildQoderRequestBody({ model, body, credentials, log, proxyOptio
     maxTokens = body.max_completion_tokens;
   }
 
+  // v1.1 — forward an explicit reasoning-effort level when the model
+  // advertises it. `none` disables thinking only if the model allows it;
+  // unsupported levels are ignored (platform default applies).
+  const parameters = { max_tokens: maxTokens };
+  const rawEffort = body?.reasoning_effort;
+  if (rawEffort !== undefined && rawEffort !== null && String(rawEffort).length > 0) {
+    const effort = String(rawEffort).toLowerCase();
+    if (effort === "none") {
+      if (supportsDisabledThinking(modelConfig)) {
+        parameters.enable_thinking = false;
+      } else {
+        log?.warn?.("QODER", `model "${qoderKey}" does not allow disabling thinking; ignoring reasoning_effort=none`);
+      }
+    } else if (supportedEfforts(modelConfig).has(effort)) {
+      parameters.reasoning_effort = effort;
+      parameters.enable_thinking = true;
+    } else {
+      log?.warn?.("QODER", `model "${qoderKey}" does not support reasoning_effort="${effort}"; ignoring`);
+    }
+  }
+
+  // v1.1 — optional context-window override. Only forwarded when the value
+  // matches one of the model's advertised windows (200K/400K/1M, ...);
+  // otherwise the platform default window is used.
+  const rawCtx = body?.context_length;
+  if (rawCtx !== undefined && rawCtx !== null && String(rawCtx).length > 0) {
+    const ctx = Number(rawCtx);
+    if (!Number.isFinite(ctx) || ctx <= 0) {
+      log?.warn?.("QODER", `invalid context_length=${rawCtx}; ignoring`);
+    } else if (contextWindowTokens(modelConfig).has(ctx)) {
+      parameters.context_length = ctx;
+    } else {
+      log?.warn?.("QODER", `model "${qoderKey}" has no ${ctx}-token context window; ignoring`);
+    }
+  }
+
   const lastUser = lastUserText(messages);
   const psd = credentials.providerSpecificData || {};
   const sessionId = stableHash("qoder-session", psd.userId, qoderKey);
@@ -188,7 +269,7 @@ async function buildQoderRequestBody({ model, body, credentials, log, proxyOptio
       system: systemText,
       messages,
       tools: Array.isArray(tools) ? tools : [],
-      parameters: { max_tokens: maxTokens },
+      parameters,
       chat_context: {
         chatPrompt: "",
         imageUrls: null,
