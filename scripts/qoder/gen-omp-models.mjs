@@ -43,7 +43,7 @@ const CNY_TO_USD_REFERENCE_RATE = 0.148882;
 // - Qwen 3.7 Plus/Flash use the highest <=1M input tier because OMP custom
 //   models.yml cannot express multiple context-length price tiers;
 // - cacheRead is the vendor's cache-hit rate and cacheWrite is explicit cache
-//   creation where the vendor publishes it;
+//   creation only when the original/vendor-supplied listing publishes it;
 // - these are vendor API baselines, NOT the user's actual Qoder Enterprise bill.
 const OFFICIAL_API_PRICES = Object.freeze({
   "glm-5.3-flash": { currency: "CNY", input: 0.8, output: 2.8, cacheRead: 0.23, cacheWrite: 0 },
@@ -59,7 +59,9 @@ const OFFICIAL_API_PRICES = Object.freeze({
   "deepseek-v4-flash": { currency: "USD", input: 0.44, output: 1.32, cacheRead: 0.014, cacheWrite: 0 },
   "deepseek-v4-pro": { currency: "USD", input: 1.32, output: 3.96, cacheRead: 0.044, cacheWrite: 0 },
 
-  "kimi-k2.7-code": { currency: "CNY", input: 6.5, output: 27, cacheRead: 1.3, cacheWrite: 8.125 },
+  // Moonshot's directly supplied Kimi listing publishes input/output/cache-hit
+  // pricing but no explicit cache-creation rate, so cacheWrite remains 0 here.
+  "kimi-k2.7-code": { currency: "CNY", input: 6.5, output: 27, cacheRead: 1.3, cacheWrite: 0 },
   "minimax-m2.7": { currency: "USD", input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.375 },
 });
 
