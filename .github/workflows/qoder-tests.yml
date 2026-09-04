@@ -21,7 +21,7 @@ jobs:
       # so npm ci cannot be used — npm install mirrors the project workflow.
       - run: npm install
       - name: Qoder unit tests
-        run: npx vitest run tests/unit/qoder.test.js tests/unit/qoder-billing.test.js tests/unit/qoder-queue-retry.test.js tests/unit/qoder-context-effort.test.js tests/unit/qoder-model-meta.test.js
+        run: npx --yes vitest@5.0.0 run tests/unit/qoder.test.js tests/unit/qoder-billing.test.js tests/unit/qoder-queue-retry.test.js tests/unit/qoder-context-effort.test.js tests/unit/qoder-model-meta.test.js
 
   build:
     runs-on: ubuntu-latest

@@ -6,16 +6,35 @@
 # Usage:
 #   NINE_ROUTER_API_KEY=... scripts/qoder/smoke-test.sh [baseUrl]
 #   baseUrl defaults to http://127.0.0.1:20127
-#   If NINE_ROUTER_API_KEY is not set, attempts to read the active key from
-#   the local $HOME/.9router/db/data.sqlite if present.
+#   Automatic key resolution from ~/.9router/db/data.sqlite is allowed ONLY
+#   when baseUrl is loopback (127.0.0.1 / localhost / [::1]). For non-loopback
+#   endpoints, NINE_ROUTER_API_KEY is strictly required (no ambient authority).
 set -euo pipefail
 
 BASE="${1:-http://127.0.0.1:20127}"
+
+is_loopback_base() {
+  case "$BASE" in
+    http://127.0.0.1:*|http://localhost:*|http://[::1]:*|https://127.0.0.1:*|https://localhost:*|https://[::1]:*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 KEY="${NINE_ROUTER_API_KEY:-}"
-if [ -z "$KEY" ] && [ -f "${HOME}/.9router/db/data.sqlite" ] && command -v sqlite3 >/dev/null 2>&1; then
-  KEY=$(sqlite3 "${HOME}/.9router/db/data.sqlite" "SELECT key FROM apiKeys WHERE isActive = 1 LIMIT 1;" 2>/dev/null || true)
+if [ -z "$KEY" ] && is_loopback_base; then
+  if [ -f "${HOME}/.9router/db/data.sqlite" ] && command -v sqlite3 >/dev/null 2>&1; then
+    KEY=$(sqlite3 "${HOME}/.9router/db/data.sqlite" "SELECT key FROM apiKeys WHERE isActive = 1 LIMIT 1;" 2>/dev/null || true)
+  fi
 fi
-KEY="${KEY:-sk-placeholder}"
+
+if [ -z "$KEY" ]; then
+  echo "ERROR: NINE_ROUTER_API_KEY is required for non-loopback endpoint: ${BASE}" >&2
+  exit 2
+fi
 
 AUTH="Authorization: Bearer ${KEY}"
 CT="Content-Type: application/json"
@@ -51,8 +70,8 @@ echo "$ERR_MSG" | head -c 300
 echo ""
 rm -f "$FAIL_OUT"
 
-if [[ "$CODE" != "400" && "$CODE" != "503" ]]; then
-  echo "FAIL: expected HTTP 400 or 503, got: $CODE" >&2
+if [[ "$CODE" != "400" ]]; then
+  echo "FAIL: expected HTTP 400, got: $CODE" >&2
   exit 1
 fi
 if [[ "$ERR_MSG" != *"supported:"* ]]; then

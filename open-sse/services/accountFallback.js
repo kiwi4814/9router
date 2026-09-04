@@ -21,6 +21,13 @@ export function getQuotaCooldown(backoffLevel = 0) {
  * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number }}
  */
 export function checkFallbackError(status, errorText, backoffLevel = 0) {
+  // HTTP 400 Bad Request represents a client-side parameter error (e.g. invalid
+  // context_length, unsupported options). It is not a provider or account outage,
+  // so do not mark the account unavailable or trigger account fallback.
+  if (status === 400) {
+    return { shouldFallback: false, cooldownMs: 0 };
+  }
+
   const lowerError = errorText
     ? (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase()
     : "";
