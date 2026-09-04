@@ -15,7 +15,7 @@ BASE="${1:-http://127.0.0.1:20127}"
 
 is_loopback_base() {
   case "$BASE" in
-    http://127.0.0.1:*|http://localhost:*|http://[::1]:*|https://127.0.0.1:*|https://localhost:*|https://[::1]:*)
+    http://127.0.0.1:*|http://localhost:*|http://\[::1\]:*|https://127.0.0.1:*|https://localhost:*|https://\[::1\]:*)
       return 0
       ;;
     *)
