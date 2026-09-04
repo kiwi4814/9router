@@ -33,8 +33,8 @@ rows.sort((a, b) => a.id.localeCompare(b.id));
 // OMP's `cost` schema is USD per 1M tokens. Several China-region vendor
 // price lists are published in CNY, so freeze a clearly dated FX reference
 // instead of putting raw CNY values under OMP's dollar-labelled cost UI.
-// Reference: 2026-09-04, 1 CNY = 0.148881 USD.
-const CNY_TO_USD_REFERENCE_RATE = 0.148881;
+// Reference: 2026-09-04, 1 CNY = 0.148882 USD.
+const CNY_TO_USD_REFERENCE_RATE = 0.148882;
 
 // Verified 2026-09-04 vendor API list prices per 1M tokens.
 // Policy for this workstation:
@@ -42,6 +42,8 @@ const CNY_TO_USD_REFERENCE_RATE = 0.148881;
 // - DeepSeek uses weekday PEAK/daytime pricing because usage is during work hours;
 // - Qwen 3.7 Plus/Flash use the highest <=1M input tier because OMP custom
 //   models.yml cannot express multiple context-length price tiers;
+// - cacheRead is the vendor's cache-hit rate and cacheWrite is explicit cache
+//   creation where the vendor publishes it;
 // - these are vendor API baselines, NOT the user's actual Qoder Enterprise bill.
 const OFFICIAL_API_PRICES = Object.freeze({
   "glm-5.3-flash": { currency: "CNY", input: 0.8, output: 2.8, cacheRead: 0.23, cacheWrite: 0 },
@@ -51,13 +53,13 @@ const OFFICIAL_API_PRICES = Object.freeze({
   "qwen3.8-flash": { currency: "CNY", input: 0.8, output: 2.7, cacheRead: 0.1, cacheWrite: 1.25 },
   "qwen3.8-max": { currency: "CNY", input: 12, output: 36, cacheRead: 1.5, cacheWrite: 15 },
   "qwen3.7-max": { currency: "CNY", input: 12, output: 36, cacheRead: 2.4, cacheWrite: 15 },
-  "qwen3.7-plus": { currency: "CNY", input: 6, output: 24, cacheRead: 1.2, cacheWrite: 0 },
-  "qwen3.7-flash": { currency: "CNY", input: 1.2, output: 4.8, cacheRead: 0.24, cacheWrite: 0 },
+  "qwen3.7-plus": { currency: "CNY", input: 6, output: 24, cacheRead: 1.2, cacheWrite: 7.5 },
+  "qwen3.7-flash": { currency: "CNY", input: 1.2, output: 4.8, cacheRead: 0.24, cacheWrite: 1.5 },
 
   "deepseek-v4-flash": { currency: "USD", input: 0.44, output: 1.32, cacheRead: 0.014, cacheWrite: 0 },
   "deepseek-v4-pro": { currency: "USD", input: 1.32, output: 3.96, cacheRead: 0.044, cacheWrite: 0 },
 
-  "kimi-k2.7-code": { currency: "CNY", input: 6.5, output: 27, cacheRead: 1.3, cacheWrite: 0 },
+  "kimi-k2.7-code": { currency: "CNY", input: 6.5, output: 27, cacheRead: 1.3, cacheWrite: 8.125 },
   "minimax-m2.7": { currency: "USD", input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.375 },
 });
 
