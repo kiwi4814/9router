@@ -23,6 +23,8 @@ jobs:
       # The repo deliberately tracks no package-lock.json (upstream style),
       # so npm ci cannot be used — npm install mirrors the project workflow.
       - run: npm install
+      - name: Validate Qoder OMP generator syntax
+        run: node --check scripts/qoder/gen-omp-models.mjs
       - name: Qoder and fallback unit tests
         run: npx --yes vitest@5.0.0 run tests/unit/qoder.test.js tests/unit/qoder-billing.test.js tests/unit/qoder-queue-retry.test.js tests/unit/qoder-context-effort.test.js tests/unit/qoder-model-meta.test.js tests/unit/account-fallback-400.test.js
 
