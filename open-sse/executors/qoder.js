@@ -42,7 +42,6 @@ import {
   maxContextWindowTokens,
   supportedEfforts,
   supportsDisabledThinking,
-  legacyInternalQoderKey,
 } from "../services/qoderModelMeta.js";
 
 /**
@@ -163,11 +162,12 @@ function truncate(s, n) {
  * Map the OpenAI-style request body into the exact shape Qoder expects.
  */
 async function buildQoderRequestBody({ model, body, credentials, log, proxyOptions, signal }) {
-  // v1.2.1 — resolve a client-supplied model string against the SAME live
+  // v1.2.3 — resolve a client-supplied model string against the SAME live
   // catalog snapshot that /v1/models advertised: public slug (pretty id) →
-  // internal key. Legacy internal keys pass through untouched. The static
-  // v1.2-released map is only a fallback when the live catalog cannot be
-  // fetched at all (never pre-empts a fresher live mapping).
+  // internal key. Legacy internal keys (e.g. gfmodel) pass through as rawKey
+  // untouched. Pretty IDs fail closed if the live catalog does not advertise
+  // them, preventing moving aliases (e.g. qmodel_latest) from routing to an
+  // unintended upstream version.
   const rawKey = String(model || "").replace(/^qoder\//, "").replace(/^qd\//, "");
   let qoderKey = rawKey;
   let catalog = null;
@@ -178,8 +178,6 @@ async function buildQoderRequestBody({ model, body, credentials, log, proxyOptio
   }
   if (catalog?.aliases?.has(rawKey)) {
     qoderKey = catalog.aliases.get(rawKey);
-  } else if (!catalog) {
-    qoderKey = legacyInternalQoderKey(rawKey);
   }
   
   // Fetch model config from dynamic API instead of relying on static QODER_MODEL_MAP.
