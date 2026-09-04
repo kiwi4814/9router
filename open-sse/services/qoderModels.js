@@ -25,6 +25,7 @@ import { buildCosyHeaders } from "../shared/qoder/cosy.js";
 import {
   maxContextWindowTokens,
   qoderCapabilitiesForEntry,
+  buildPublicAliases,
 } from "./qoderModelMeta.js";
 import {
   QODER_MODEL_LIST_URL,
@@ -52,14 +53,14 @@ export function isQoderPat(token) {
 /** @type {Map<string, { accessToken: string, userId: string, expiresAt: number }>} */
 const patJobCache = new Map();
 
-/** @type {Map<string, { expiresAt: number, models: any[], rawConfigs: Map<string, object>, fetched: boolean }>} */
+/** @type {Map<string, { expiresAt: number, models: any[], rawConfigs: Map<string, object>, aliases: Map<string, string>, fetched: boolean }>} */
 const catalogCache = new Map();
 
 /**
  * In-flight fetch promises keyed by cacheKey. Concurrent first-time
  * callers (parallel chat windows) all observe the same Promise so we
  * fan-out exactly one upstream request per credential per miss.
- * @type {Map<string, Promise<{ expiresAt: number, models: any[], rawConfigs: Map<string, object>, fetched: boolean } | null>>}
+ * @type {Map<string, Promise<{ expiresAt: number, models: any[], rawConfigs: Map<string, object>, aliases: Map<string, string>, fetched: boolean } | null>>}
  */
 const inflight = new Map();
 
@@ -192,8 +193,10 @@ function cosyCredsFromConnection(credentials) {
 
 /**
  * Fetch the live model list for this credential. Returns:
- *   { models: [{ id, name, contextLength, isVL, isReasoning, ... }, ...],
- *     rawConfigs: Map<modelKey, modelConfigObject> }
+ *   { models: [{ id (public slug), name, contextLength, isVL, isReasoning,
+ *                capabilities, ... }, ...],
+ *     rawConfigs: Map<internalKey, modelConfigObject>,
+ *     aliases: Map<publicSlug, internalKey> }
  * or `null` on any error.
  */
 async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null) {
@@ -248,28 +251,33 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null) {
   const body = await response.json().catch(() => null);
   if (!body || !Array.isArray(body.chat)) return null;
 
-  const models = [];
+  const enabledEntries = [];
   const rawConfigs = new Map();
   for (const entry of body.chat) {
     if (!entry || typeof entry !== "object") continue;
     const key = entry.key;
     if (!key) continue;
-
     // Always cache the config — chat needs model_config even for UI-hidden
     // models (enable:false). Upstream still accepts chat for these keys.
     rawConfigs.set(key, entry);
     if (entry.enable === false) continue;
+    enabledEntries.push(entry);
+  }
 
-    // v1.2 — attach the real per-model capability facts (windows, efforts,
-    // reasoning, VL) to each catalog row. The OpenAI /v1/models route maps
-    // the id to a pretty public id before advertising; rawConfigs stays
-    // keyed by the internal catalog key for the chat executor, and the
-    // dashboard keeps consuming internal ids unchanged.
+  // v1.2.1 — public ids are DERIVED from the live catalog (slug of the
+  // display name) inside this fetch, with collision-safe suffixes, and the
+  // same alias map rides along in the cache entry so chat routing resolves
+  // pretty ids against the identical snapshot that was advertised.
+  const { publicToInternal, internalToPublic } = buildPublicAliases(enabledEntries);
+
+  const models = [];
+  for (const entry of enabledEntries) {
+    const key = entry.key;
     const display = entry.display_name || key;
     const maxWindow = maxContextWindowTokens(entry);
     const ctx = maxWindow > 0 ? maxWindow : (Number(entry.max_input_tokens) || 131_072);
     models.push({
-      id: key,
+      id: internalToPublic.get(key),
       name: `${display}`,
       contextLength: ctx,
       isVL: !!entry.is_vl,
@@ -280,7 +288,7 @@ async function fetchQoderCatalogRaw(credentials, signal, proxyOptions = null) {
     });
   }
 
-  return { models, rawConfigs };
+  return { models, rawConfigs, aliases: publicToInternal };
 }
 
 /**
@@ -336,6 +344,7 @@ export async function resolveQoderModels(credentials, options = {}) {
       expiresAt: Date.now() + CACHE_TTL_MS,
       models: fetched.models,
       rawConfigs: fetched.rawConfigs,
+      aliases: fetched.aliases,
       fetched: true,
     };
     catalogCache.set(key, entry);
