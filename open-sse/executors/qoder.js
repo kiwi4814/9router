@@ -38,23 +38,22 @@ import {
 } from "../shared/qoder/constants.js";
 import { getQoderModelConfig, resolveQoderModels, isQoderPat, resolveQoderCredentials } from "../services/qoderModels.js";
 import {
-  internalQoderKey,
   contextWindowTokens,
   maxContextWindowTokens,
   supportedEfforts,
   supportsDisabledThinking,
+  legacyInternalQoderKey,
 } from "../services/qoderModelMeta.js";
 
 /**
- * v1.2 — when the client does not pick a context window, default to the
- * model's largest advertised window so the capability /v1/models advertises
- * and the real upstream behavior match. Opt out per deployment with
- * QODER_DEFAULT_MAX_CONTEXT=0|false|no|off.
+ * v1.2.1 — default-max-context is an EXPLICIT deployment opt-in
+ * (QODER_DEFAULT_MAX_CONTEXT=1|true|yes|on). Without it the executor keeps
+ * platform-default window semantics so a bare curl never silently changes
+ * request semantics. The personal launchd deployment sets it to 1.
  */
 function defaultMaxContextEnabled() {
   const raw = String(process.env.QODER_DEFAULT_MAX_CONTEXT ?? "").trim().toLowerCase();
-  // Default ON; only an explicit opt-out disables it.
-  return !["0", "false", "no", "off", "disable", "disabled"].includes(raw);
+  return ["1", "true", "yes", "on", "enable", "enabled"].includes(raw);
 }
 
 /**
@@ -155,18 +154,33 @@ function truncate(s, n) {
 }
 
 // v1.1/v1.2 catalog helpers (supportedEfforts, supportsDisabledThinking,
-// contextWindowTokens, internalQoderKey) live in qoderModelMeta.js so the
-// executor and the /v1/models live resolver share one implementation.
+// contextWindowTokens) and the v1.2.1 dynamic slug identity live in
+// qoderModelMeta.js so the executor and the /v1/models live resolver share
+// one implementation.
 
 
 /**
  * Map the OpenAI-style request body into the exact shape Qoder expects.
  */
 async function buildQoderRequestBody({ model, body, credentials, log, proxyOptions, signal }) {
-  // Accept pretty public ids (qd/glm-5.3-flash), legacy internal keys
-  // (qd/gfmodel) and qoder/-prefixed spellings; always resolve to the
-  // internal catalog key the model_config lookup needs.
-  const qoderKey = internalQoderKey(model);
+  // v1.2.1 — resolve a client-supplied model string against the SAME live
+  // catalog snapshot that /v1/models advertised: public slug (pretty id) →
+  // internal key. Legacy internal keys pass through untouched. The static
+  // v1.2-released map is only a fallback when the live catalog cannot be
+  // fetched at all (never pre-empts a fresher live mapping).
+  const rawKey = String(model || "").replace(/^qoder\//, "").replace(/^qd\//, "");
+  let qoderKey = rawKey;
+  let catalog = null;
+  try {
+    catalog = await resolveQoderModels(credentials, { log, proxyOptions, signal });
+  } catch {
+    catalog = null;
+  }
+  if (catalog?.aliases?.has(rawKey)) {
+    qoderKey = catalog.aliases.get(rawKey);
+  } else if (!catalog) {
+    qoderKey = legacyInternalQoderKey(rawKey);
+  }
   
   // Fetch model config from dynamic API instead of relying on static QODER_MODEL_MAP.
   // This allows support for new Qoder models (e.g., qmodel_latest) without code changes.

@@ -10,7 +10,7 @@ import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
-import { publicQoderId } from "open-sse/services/qoderModelMeta.js";
+import { mergeCapabilities } from "open-sse/services/qoderModelMeta.js";
 import { resolveCopilotModels } from "open-sse/services/copilotModels.js";
 import { resolveClinepassModels } from "open-sse/services/clinepassModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
@@ -42,15 +42,10 @@ const LIVE_MODEL_RESOLVERS = {
       providerSpecificData: conn.providerSpecificData || {}
     });
     if (!result?.models?.length) return null;
-    // v1.2 — advertise pretty public ids (qd/glm-5.3-flash instead of
-    // qd/gfmodel) with the real per-model capability metadata attached.
-    // The chat executor still accepts both spellings (see internalQoderKey).
-    return {
-      models: result.models.map((m) => ({
-        ...m,
-        id: publicQoderId(m.id),
-      })),
-    };
+    // v1.2.1 — rows already carry public ids derived from the live catalog
+    // (slug of display_name) plus per-model capability facts; pass them
+    // through untouched so advertised identity == chat-resolved identity.
+    return { models: result.models };
   },
   kimchi: async (conn) => {
     const result = await resolveKimchiModels({
@@ -485,13 +480,15 @@ export async function buildModelsList(kindFilter, options = {}) {
           object: "model",
           owned_by: outputAlias,
         };
-        // Live-catalog resolvers (kiro/qoder/github/clinepass) mostly only return
-        // { id, name } — no per-model capability data. Fall back to the same
-        // pattern-matched capabilities the dashboard uses (useModelCaps.js) so
-        // dynamically-discovered LLM models still surface vision/reasoning/search/tools.
-        const caps = liveCapabilitiesById.get(modelId)
-          || capabilitiesFromServiceKind(customKind || liveKind)
+        // Live resolvers return only the facts they know (qoder: windows,
+        // efforts, reasoning, VL from the account catalog). Merge those over
+        // the richer static/pattern knowledge (pdf/video/audio/thinkingFormat
+        // etc.) instead of replacing it — an absent field upstream does NOT
+        // mean the capability is unsupported.
+        const baseCaps = capabilitiesFromServiceKind(customKind || liveKind)
           || (kind === LLM_KIND ? getCapabilitiesForModel(providerId, modelId) : null);
+        const liveCaps = liveCapabilitiesById.get(modelId);
+        const caps = mergeCapabilities(baseCaps, liveCaps);
         if (caps) model.capabilities = caps;
         // Token limits under the snake_case names the OpenAI/OpenRouter
         // convention uses. `capabilities.contextWindow` is camelCase and nested,

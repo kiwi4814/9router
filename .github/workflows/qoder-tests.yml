@@ -1,0 +1,37 @@
+name: qoder unit tests
+
+on:
+  push:
+    branches: [feat/qodercn-vpc-selfuse]
+  pull_request:
+
+# Secret-free CI: runs only the public Qoder unit tests and the Next.js
+# build. NO Personal Access Tokens, NO live VPC traffic — acceptance against
+# the real QoderCN Enterprise VPC stays on the owner's machine (scripts/qoder).
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # The repo deliberately tracks no package-lock.json (upstream style),
+      # so npm ci cannot be used — npm install mirrors the project workflow.
+      - run: npm install
+      - name: Qoder unit tests
+        run: npx vitest run tests/unit/qoder.test.js tests/unit/qoder-billing.test.js tests/unit/qoder-queue-retry.test.js tests/unit/qoder-context-effort.test.js tests/unit/qoder-model-meta.test.js
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # The repo deliberately tracks no package-lock.json (upstream style),
+      # so npm ci cannot be used — npm install mirrors the project workflow.
+      - run: npm install
+      - name: Next.js build
+        run: npm run build

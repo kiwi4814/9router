@@ -240,17 +240,23 @@ describe("context_length passthrough", () => {
     });
   });
 
-  it("defaults to the model's largest advertised window when no override is sent (v1.2)", async () => {
-    const { payload } = await build();
-    expect(payload.parameters).toEqual({ max_tokens: 32000, context_length: 1000000 });
-  });
-
-  it("skips the default window when QODER_DEFAULT_MAX_CONTEXT=0 (v1 behavior)", async () => {
+  it("keeps v1 behavior (no context_length) when QODER_DEFAULT_MAX_CONTEXT is unset", async () => {
     const prev = process.env.QODER_DEFAULT_MAX_CONTEXT;
-    process.env.QODER_DEFAULT_MAX_CONTEXT = "0";
+    delete process.env.QODER_DEFAULT_MAX_CONTEXT;
     try {
       const { payload } = await build();
       expect(payload.parameters).toEqual({ max_tokens: 32000 });
+    } finally {
+      if (prev !== undefined) process.env.QODER_DEFAULT_MAX_CONTEXT = prev;
+    }
+  });
+
+  it("defaults to the largest advertised window when QODER_DEFAULT_MAX_CONTEXT=1", async () => {
+    const prev = process.env.QODER_DEFAULT_MAX_CONTEXT;
+    process.env.QODER_DEFAULT_MAX_CONTEXT = "1";
+    try {
+      const { payload } = await build();
+      expect(payload.parameters).toEqual({ max_tokens: 32000, context_length: 1000000 });
     } finally {
       if (prev === undefined) delete process.env.QODER_DEFAULT_MAX_CONTEXT;
       else process.env.QODER_DEFAULT_MAX_CONTEXT = prev;
