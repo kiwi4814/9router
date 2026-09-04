@@ -101,7 +101,13 @@ function stableHash(prefix, ...parts) {
   return h.digest("hex").slice(0, 16);
 }
 
-function stableChatRecordId(model, messages, tools, maxTokens) {
+/**
+ * Stable identity for the semantic request — now includes the final
+ * `parameters` block so that two requests differing only in e.g.
+ * `reasoning_effort` or `context_length` never share a request_set_id /
+ * chat_record_id (Qoder is sensitive to duplicate request identity).
+ */
+function stableChatRecordId(model, messages, tools, parameters) {
   const h = createHash("sha256");
   h.update("qoder-record\0");
   h.update(String(model));
@@ -116,7 +122,12 @@ function stableChatRecordId(model, messages, tools, maxTokens) {
     h.update("\0");
     try { h.update(JSON.stringify(tools)); } catch {}
   }
-  h.update(`\0mt=${maxTokens}`);
+  h.update("\0params=");
+  if (parameters && typeof parameters === "object") {
+    try { h.update(JSON.stringify(parameters)); } catch {}
+  } else {
+    h.update(String(parameters ?? ""));
+  }
   return h.digest("hex").slice(0, 16);
 }
 
@@ -132,10 +143,27 @@ function truncate(s, n) {
 // forward client overrides only when the upstream model actually supports
 // them — otherwise the platform default applies.
 function supportedEfforts(modelConfig) {
+  const result = new Set();
+
+  // Official Qoder SDK metadata carries efforts either as a top-level
+  // `model["efforts"]` list or as thinking_config.enabled.efforts dict.
+  if (Array.isArray(modelConfig?.efforts)) {
+    for (const value of modelConfig.efforts) {
+      if (typeof value === "string" && value.trim()) {
+        result.add(value.trim().toLowerCase());
+      }
+    }
+  }
+
   const tc = modelConfig?.thinking_config ?? modelConfig?.thinkingConfig;
-  const efforts = tc?.enabled?.efforts;
-  if (efforts && typeof efforts === "object") return new Set(Object.keys(efforts));
-  return new Set();
+  const configured = tc?.enabled?.efforts;
+  if (configured && !Array.isArray(configured) && typeof configured === "object") {
+    for (const value of Object.keys(configured)) {
+      result.add(value.trim().toLowerCase());
+    }
+  }
+
+  return result;
 }
 
 function supportsDisabledThinking(modelConfig) {
@@ -206,17 +234,19 @@ async function buildQoderRequestBody({ model, body, credentials, log, proxyOptio
   }
 
   // v1.1 — forward an explicit reasoning-effort level when the model
-  // advertises it. `none` disables thinking only if the model allows it;
-  // unsupported levels are ignored (platform default applies).
+  // advertises it. `none`/`off`/`disabled` turn thinking off when the model
+  // allows it; unsupported levels are ignored (platform default applies).
   const parameters = { max_tokens: maxTokens };
   const rawEffort = body?.reasoning_effort;
-  if (rawEffort !== undefined && rawEffort !== null && String(rawEffort).length > 0) {
-    const effort = String(rawEffort).toLowerCase();
-    if (effort === "none") {
+  if (rawEffort !== undefined && rawEffort !== null && String(rawEffort).trim().length > 0) {
+    const effort = String(rawEffort).trim().toLowerCase();
+    if (effort === "auto") {
+      // No override — omit the field entirely so the model/platform default applies.
+    } else if (effort === "none" || effort === "off" || effort === "disabled") {
       if (supportsDisabledThinking(modelConfig)) {
         parameters.enable_thinking = false;
       } else {
-        log?.warn?.("QODER", `model "${qoderKey}" does not allow disabling thinking; ignoring reasoning_effort=none`);
+        log?.warn?.("QODER", `model "${qoderKey}" does not allow disabling thinking; ignoring reasoning_effort=${effort}`);
       }
     } else if (supportedEfforts(modelConfig).has(effort)) {
       parameters.reasoning_effort = effort;
@@ -226,25 +256,33 @@ async function buildQoderRequestBody({ model, body, credentials, log, proxyOptio
     }
   }
 
-  // v1.1 — optional context-window override. Only forwarded when the value
-  // matches one of the model's advertised windows (200K/400K/1M, ...);
-  // otherwise the platform default window is used.
+  // v1.1 — optional context-window override. Explicit values MUST match an
+  // advertised window or the request fails loudly (400): a client that asks
+  // for 1M plans its compaction around 1M, so silently falling back to the
+  // platform default (e.g. 200K) would let the conversation outgrow the real
+  // upstream window and blow up later. Absent field = v1 behavior unchanged.
   const rawCtx = body?.context_length;
-  if (rawCtx !== undefined && rawCtx !== null && String(rawCtx).length > 0) {
+  if (rawCtx !== undefined && rawCtx !== null && String(rawCtx).trim().length > 0) {
     const ctx = Number(rawCtx);
-    if (!Number.isFinite(ctx) || ctx <= 0) {
-      log?.warn?.("QODER", `invalid context_length=${rawCtx}; ignoring`);
-    } else if (contextWindowTokens(modelConfig).has(ctx)) {
-      parameters.context_length = ctx;
-    } else {
-      log?.warn?.("QODER", `model "${qoderKey}" has no ${ctx}-token context window; ignoring`);
+    if (!Number.isInteger(ctx) || ctx <= 0) {
+      throw new Error(
+        `model "${qoderKey}": invalid context_length=${rawCtx} (expected a positive integer token count)`,
+      );
     }
+    const supported = contextWindowTokens(modelConfig);
+    if (!supported.has(ctx)) {
+      throw new Error(
+        `model "${qoderKey}" does not support context_length=${ctx}; ` +
+          `supported: ${[...supported].sort((a, b) => a - b).join(", ") || "default window only"}`,
+      );
+    }
+    parameters.context_length = ctx;
   }
 
   const lastUser = lastUserText(messages);
   const psd = credentials.providerSpecificData || {};
   const sessionId = stableHash("qoder-session", psd.userId, qoderKey);
-  const recordId = stableChatRecordId(qoderKey, messages, tools, maxTokens);
+  const recordId = stableChatRecordId(qoderKey, messages, tools, parameters);
 
   return {
     qoderKey,

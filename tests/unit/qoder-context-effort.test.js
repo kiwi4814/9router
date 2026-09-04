@@ -2,16 +2,19 @@
  * Unit tests for the v1.1 Qoder executor passthrough of OpenAI-style
  * `reasoning_effort` + `context_length` overrides.
  *
- * Regression surface:
+ * Regression surface (v1.1.1 semantics):
  *   - a valid advertised effort level must reach the Qoder wire as
  *     parameters.reasoning_effort + parameters.enable_thinking;
- *   - reasoning_effort="none" must disable thinking only when the model
- *     advertises disabled support;
- *   - unsupported efforts must be ignored (never crash, never leak into the
- *     payload), matching the platform's default-effort behavior;
- *   - a supported context window (e.g. 1M for GLM-5.3-Flash / gfmodel) must
- *     reach the wire as parameters.context_length; unsupported or malformed
- *     values must be ignored.
+ *   - efforts may be advertised either top-level (`efforts: [...]`) or as
+ *     thinking_config.enabled.efforts (dict or array);
+ *   - `none`/`off`/`disabled` disable thinking only when the model advertises
+ *     disabled support; `auto` and an absent field mean "no override";
+ *   - unsupported efforts are ignored (platform default), never crash;
+ *   - an EXPLICIT context_length must match an advertised window or the
+ *     request FAILS LOUDLY (build throws → execute returns 400); malformed
+ *     values throw as well. Absent field keeps v1 behavior;
+ *   - two requests differing only in reasoning_effort or context_length must
+ *     NOT share a stable request_set_id / chat_record_id.
  */
 import { describe, it, expect, vi } from "vitest";
 
@@ -49,6 +52,19 @@ const gfmodelConfig = {
   context_config: {
     "200K": { token_count: 200000, is_default: true },
     "400K": { token_count: 400000 },
+    "1M": { token_count: 1000000 },
+  },
+};
+
+// Official-SDK style: top-level `efforts` list + context config windows.
+const topLevelEffortsConfig = {
+  key: "dmodel",
+  display_name: "DeepSeek-V4-Pro",
+  is_reasoning: true,
+  max_output_tokens: 32000,
+  efforts: ["high", "max"],
+  context_config: {
+    "200K": { token_count: 200000, is_default: true },
     "1M": { token_count: 1000000 },
   },
 };
@@ -121,17 +137,47 @@ describe("reasoning_effort passthrough", () => {
     expect(payload.parameters.enable_thinking).toBe(true);
   });
 
-  it("reasoning_effort=none disables thinking only when the model allows it", async () => {
-    const { payload } = await build({ config: disableableConfig, body: { reasoning_effort: "none" } });
-    expect(payload.parameters.enable_thinking).toBe(false);
-    expect(payload.parameters.reasoning_effort).toBeUndefined();
+  it("accepts a top-level efforts[] list (official SDK shape)", async () => {
+    const { payload } = await build({ config: topLevelEffortsConfig, body: { reasoning_effort: "high" } });
+    expect(payload.parameters.reasoning_effort).toBe("high");
+    expect(payload.parameters.enable_thinking).toBe(true);
   });
 
-  it("reasoning_effort=none is ignored for models without disabled support", async () => {
-    const { payload, warn } = await build({ body: { reasoning_effort: "none" } });
+  it("rejects a top-level-effort value that is not in the list", async () => {
+    const { payload, warn } = await build({ config: topLevelEffortsConfig, body: { reasoning_effort: "low" } });
     expect(payload.parameters.reasoning_effort).toBeUndefined();
-    expect(payload.parameters.enable_thinking).toBeUndefined();
     expect(warn).toHaveBeenCalled();
+  });
+
+  it("treats off/disabled the same as none (disables thinking when allowed)", async () => {
+    for (const off of ["none", "off", "disabled"]) {
+      const { payload } = await build({ config: disableableConfig, body: { reasoning_effort: off } });
+      expect(payload.parameters.enable_thinking).toBe(false);
+      expect(payload.parameters.reasoning_effort).toBeUndefined();
+    }
+  });
+
+  it("off/disabled/none are ignored for models without disabled support", async () => {
+    for (const off of ["none", "off", "disabled"]) {
+      const { payload, warn } = await build({ body: { reasoning_effort: off } });
+      expect(payload.parameters.enable_thinking).toBeUndefined();
+      expect(warn).toHaveBeenCalled();
+    }
+  });
+
+  it("auto and blank mean 'no override' (no params, no warning)", async () => {
+    for (const value of ["auto", " AUTO ", ""]) {
+      const { payload, warn } = await build({ body: { reasoning_effort: value } });
+      expect(payload.parameters.reasoning_effort).toBeUndefined();
+      expect(payload.parameters.enable_thinking).toBeUndefined();
+      expect(warn).not.toHaveBeenCalled();
+    }
+  });
+
+  it("trims whitespace around the effort value", async () => {
+    const { payload } = await build({ body: { reasoning_effort: "  MAX  " } });
+    expect(payload.parameters.reasoning_effort).toBe("max");
+    expect(payload.parameters.enable_thinking).toBe(true);
   });
 
   it("ignores an effort the model does not advertise", async () => {
@@ -167,16 +213,20 @@ describe("context_length passthrough", () => {
     expect(payload.parameters.context_length).toBe(400000);
   });
 
-  it("ignores a context size the model does not advertise", async () => {
-    const { payload, warn } = await build({ body: { context_length: 500000 } });
-    expect(payload.parameters.context_length).toBeUndefined();
-    expect(warn).toHaveBeenCalled();
+  it("throws (fail-loud → HTTP 400) for a context the model does not advertise", async () => {
+    await expect(build({ body: { context_length: 500000 } })).rejects.toThrow(
+      /does not support context_length=500000/
+    );
   });
 
-  it("ignores malformed context_length values", async () => {
-    const { payload, warn } = await build({ body: { context_length: "not-a-number" } });
-    expect(payload.parameters.context_length).toBeUndefined();
-    expect(warn).toHaveBeenCalled();
+  it("throws for malformed context_length values", async () => {
+    await expect(build({ body: { context_length: "not-a-number" } })).rejects.toThrow(/invalid context_length/);
+    await expect(build({ body: { context_length: -1 } })).rejects.toThrow(/invalid context_length/);
+    await expect(build({ body: { context_length: 1.5 } })).rejects.toThrow(/invalid context_length/);
+  });
+
+  it("lists the supported windows in the 400 error", async () => {
+    await expect(build({ body: { context_length: 500000 } })).rejects.toThrow(/200000, 400000, 1000000/);
   });
 
   it("combines effort + context overrides in one request", async () => {
@@ -193,5 +243,28 @@ describe("context_length passthrough", () => {
   it("leaves parameters untouched when no overrides are sent", async () => {
     const { payload } = await build();
     expect(payload.parameters).toEqual({ max_tokens: 32000 });
+  });
+});
+
+describe("stable record identity", () => {
+  it("request_set_id/chat_record_id differ when only reasoning_effort changes", async () => {
+    const low = await build({ body: { reasoning_effort: "high" } });
+    const high = await build({ body: { reasoning_effort: "max" } });
+    expect(low.payload.request_set_id).not.toBe(high.payload.request_set_id);
+    expect(low.payload.chat_record_id).not.toBe(high.payload.chat_record_id);
+  });
+
+  it("request_set_id/chat_record_id differ when only context_length changes", async () => {
+    const twoHundred = await build({ body: { context_length: 200000 } });
+    const oneM = await build({ body: { context_length: 1000000 } });
+    expect(twoHundred.payload.request_set_id).not.toBe(oneM.payload.request_set_id);
+    expect(twoHundred.payload.chat_record_id).not.toBe(oneM.payload.chat_record_id);
+  });
+
+  it("identical requests still share a stable record id", async () => {
+    const a = await build({ body: { reasoning_effort: "max", context_length: 1000000 } });
+    const b = await build({ body: { reasoning_effort: "max", context_length: 1000000 } });
+    expect(a.payload.request_set_id).toBe(b.payload.request_set_id);
+    expect(a.payload.chat_record_id).toBe(b.payload.chat_record_id);
   });
 });
