@@ -12,7 +12,7 @@ import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { mergeCapabilities } from "open-sse/services/qoderModelMeta.js";
 import { resolveCopilotModels } from "open-sse/services/copilotModels.js";
-import { resolveClinepassModels } from "open-sse/services/clinepassModels.js";
+import { resolveClinepassModels, resolveClineModels } from "open-sse/services/clinepassModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
@@ -35,6 +35,8 @@ const LIVE_MODEL_RESOLVERS = {
   qoder: async (conn) => {
     const result = await resolveQoderModels({
       accessToken: conn.accessToken,
+      // PAT (pt-...) connections keep the token in apiKey; without it the live
+      // catalog silently fails and /v1/models falls back to the static list.
       apiKey: conn.apiKey,
       refreshToken: conn.refreshToken,
       email: conn.email,
@@ -74,6 +76,13 @@ const LIVE_MODEL_RESOLVERS = {
   },
   clinepass: async (conn) => {
     const result = await resolveClinepassModels({
+      accessToken: conn.accessToken,
+      apiKey: conn.apiKey,
+    });
+    return result?.models?.length ? { models: result.models } : null;
+  },
+  cline: async (conn) => {
+    const result = await resolveClineModels({
       accessToken: conn.accessToken,
       apiKey: conn.apiKey,
     });
