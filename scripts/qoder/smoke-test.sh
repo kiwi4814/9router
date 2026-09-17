@@ -82,9 +82,19 @@ fi
 echo "== 4. /v1/models advertises public ids =="
 COUNT=$(curl -sf "${BASE}/v1/models" | jq -r '[.data[] | select(.id|startswith("qd/")) | .id] | length')
 echo "qd/* rows: ${COUNT}"
-if [[ "$COUNT" -ne 13 ]]; then
-  echo "FAIL: expected 13 qd/* models, got: $COUNT" >&2
+# The live catalog grows as Qoder adds models (13 → 14 when kimi-k3 landed),
+# so assert a healthy floor plus the canonical routing targets instead of an
+# exact count — an exact count fails every catalog refresh.
+if [[ "$COUNT" -lt 10 ]]; then
+  echo "FAIL: expected at least 10 qd/* models, got: $COUNT" >&2
   exit 1
 fi
+ROWS=$(curl -sf "${BASE}/v1/models" | jq -r '[.data[] | select(.id|startswith("qd/")) | .id] | join(" ")')
+for required in "qd/auto" "qd/glm-5.3-flash" "qd/kimi-k3"; do
+  if [[ " $ROWS " != *" $required "* ]]; then
+    echo "FAIL: expected $required to be advertised" >&2
+    exit 1
+  fi
+done
 
 echo "SMOKE TEST: ALL 4 CHECKS PASSED"

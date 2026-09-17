@@ -56,12 +56,24 @@ const OFFICIAL_API_PRICES = Object.freeze({
   "qwen3.7-plus": { currency: "CNY", input: 6, output: 24, cacheRead: 1.2, cacheWrite: 7.5 },
   "qwen3.7-flash": { currency: "CNY", input: 1.2, output: 4.8, cacheRead: 0.24, cacheWrite: 1.5 },
 
-  "deepseek-v4-flash": { currency: "USD", input: 0.44, output: 1.32, cacheRead: 0.014, cacheWrite: 0 },
+  // Verified 2026-09-17 official listings:
+  // - DeepSeek V4.1 Flash (api-docs.deepseek.com/quick_start/pricing, prices
+  //   effective 2026-09-10): weekday PEAK/daytime USD rates (work-hours usage
+  //   policy); cacheWrite stays 0 — DeepSeek publishes no explicit cache-
+  //   creation rate. v4-flash now routes to V4.1 Flash at these prices.
+  "deepseek-v4-flash": { currency: "USD", input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0 },
+  "deepseek-flash": { currency: "USD", input: 0.30, output: 1.20, cacheRead: 0.006, cacheWrite: 0 },
   "deepseek-v4-pro": { currency: "USD", input: 1.32, output: 3.96, cacheRead: 0.044, cacheWrite: 0 },
 
   // Moonshot's directly supplied Kimi listing publishes input/output/cache-hit
   // pricing but no explicit cache-creation rate, so cacheWrite remains 0 here.
   "kimi-k2.7-code": { currency: "CNY", input: 6.5, output: 27, cacheRead: 1.3, cacheWrite: 0 },
+  // Kimi K3 — platform.kimi.com CN listing (cache-hit ¥2 / input ¥20 / output
+  // ¥100 per 1M tokens). The international listing is USD 3/15/0.3.
+  "kimi-k3": { currency: "CNY", input: 20, output: 100, cacheRead: 2, cacheWrite: 0 },
+  // NOTE: kimi-k2.8-preview has NO official per-token price card yet (Kimi
+  // Code membership quota only; third-party $1/$4 listings are unofficial).
+  // The generator emits it without a cost line instead of inventing one.
   "minimax-m2.7": { currency: "USD", input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.375 },
 });
 
@@ -126,10 +138,11 @@ function officialCostFor(model) {
 
   const source = key ? OFFICIAL_API_PRICES[key] : null;
   if (!source) {
-    throw new Error(
-      `no verified official API price configured for ${model?.id || model?.name || "unknown model"}; ` +
-        "refusing to emit a misleading OMP cost"
-    );
+    // v1.2.6 — an unpriced model no longer aborts the whole generation (that
+    // hard-failed the daily omp-sync whenever Qoder added a catalog entry
+    // before a verified vendor price existed). The row is emitted WITHOUT a
+    // cost line instead — never a fabricated one — and the caller warns.
+    return null;
   }
 
   return {
@@ -145,6 +158,7 @@ function formatCost(cost) {
 }
 
 const out = [];
+const unpriced = [];
 for (const m of rows) {
   const caps = m.capabilities || {};
   const ctx = m.context_length || caps.contextWindow;
@@ -153,6 +167,7 @@ for (const m of rows) {
   const efforts = Array.isArray(caps.reasoningEfforts) && caps.reasoningEfforts.length > 0;
   const canThink = caps.reasoning === true || efforts;
   const cost = officialCostFor(m);
+  if (!cost) unpriced.push(m.id);
 
   out.push(`      - id: ${m.id}`);
   out.push(`        name: ${modelNameWithFactor(m.id, caps)}`);
@@ -161,7 +176,9 @@ for (const m of rows) {
   out.push(`        input: [${inputs.join(", ")}]`);
   out.push(`        contextWindow: ${ctx || 200000}`);
   out.push(`        maxTokens: ${maxOut || 32768}`);
-  out.push(`        cost: ${formatCost(cost)}`);
+  // No `cost` line for unpriced models — OMP renders an empty cost cell;
+  // the "Qoder <factor>×" name suffix still shows the credits multiplier.
+  if (cost) out.push(`        cost: ${formatCost(cost)}`);
 }
 
 if (withLegacyAliases) {
@@ -192,6 +209,7 @@ if (withLegacyAliases) {
       const efforts = Array.isArray(caps.reasoningEfforts) && caps.reasoningEfforts.length > 0;
       const canThink = caps.reasoning === true || efforts;
       const cost = officialCostFor(m);
+      if (!cost && !unpriced.includes(`qd/${legacy}`)) unpriced.push(`qd/${legacy}`);
 
       out.push(`      - id: qd/${legacy}`);
       out.push(`        name: ${modelNameWithFactor(`qd/${legacy}`, caps)}`);
@@ -200,9 +218,16 @@ if (withLegacyAliases) {
       out.push(`        input: [${inputs.join(", ")}]`);
       out.push(`        contextWindow: ${ctx || 200000}`);
       out.push(`        maxTokens: ${maxOut || 32768}`);
-      out.push(`        cost: ${formatCost(cost)}`);
+      if (cost) out.push(`        cost: ${formatCost(cost)}`);
     }
   }
+}
+
+if (unpriced.length > 0) {
+  console.error(
+    `[gen-omp-models] WARNING: no verified official API price for ${unpriced.join(", ")}; ` +
+      "emitted without a cost line (add OFFICIAL_API_PRICES entries once the vendor publishes one)",
+  );
 }
 
 console.log("    models:");
