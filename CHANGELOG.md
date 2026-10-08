@@ -1,3 +1,11 @@
+# Unreleased
+
+## Fixes
+- **Qoder**: restore connection timer cleanup in `finally` after merging strict-proxy error handling.
+
+## Maintenance
+- Add the project-local `qodercn-vpc-update` skill for upstream/CLI updates, release-impact assessment, live VPC model synchronization, and low-cost runtime verification; keep npm recovery conditional.
+
 # v0.5.95 (2026-10-01)
 
 ## Features

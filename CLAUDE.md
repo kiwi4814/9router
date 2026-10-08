@@ -90,3 +90,7 @@ Pre-translate hooks that compress `tool_result` content in-place to cut tokens. 
 - Binary/protobuf upstreams (kiro EventStream, cursor protobuf, commandcode NDJSON) don't round-trip through OpenAI — they're handled inside their own executor, not the translator.
 - **Security-first on PRs**: Security is the top priority when reviewing or creating PRs. Audit authentication, credential/token storage & leaks, header manipulation (`X-Forwarded-For`), and SSRF risks before functional logic. Always include explicit security warnings/notes when reporting PR reviews or changes to the user.
 - Versioning: root and `cli/` are versioned independently; changes are logged in `CHANGELOG.md`. Commit style is Conventional Commits (`fix(translator): …`, `feat(...)`).
+
+## QoderCN VPC maintenance (manual)
+
+When the user explicitly requests the full QoderCN VPC update workflow, read `.agents/skills/qodercn-vpc-update/SKILL.md`. It owns upstream/CLI synchronization, release-impact assessment, live model synchronization, and low-cost verification. Do not run it for ordinary Qoder bug fixes or status checks.

@@ -887,6 +887,7 @@ export class QoderExecutor extends BaseExecutor {
         // strictProxy wraps transport errors; retain caller cancellation semantics.
         if (mergedSignal.aborted) throw mergedSignal.reason;
         throw err;
+      } finally {
         // Queue retry is intentionally limited to explicit Qoder queue signals
         // below. DNS/TLS/proxy/configuration failures must fail fast instead of
         // being hidden behind up to 15 long retries.
