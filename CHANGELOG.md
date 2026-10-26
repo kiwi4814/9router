@@ -6,6 +6,7 @@
 ## Maintenance
 - Add the project-local `qodercn-vpc-update` skill for upstream/CLI updates, release-impact assessment, live VPC model synchronization, and low-cost runtime verification; keep npm recovery conditional.
 - Require rebuilding and switching the running repository service during the QoderCN VPC update workflow, with rollback and actual dashboard/version/API verification; distinguish it from updating the official npm launcher.
+- **QoderCN CLI**: verify npm `1.1.74` compatibility with VPC routing, live model metadata, and streaming; keep COSY/signature constants unchanged. The [CN release notes](https://docs.qoder.cn/product-overview/qoder-cn-cli#cli-1-1-74) cover Sites, session/checkpoint improvements, and image-to-image generation.
 
 # v0.5.104 (2026-10-15)
 
