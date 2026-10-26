@@ -94,3 +94,12 @@ Pre-translate hooks that compress `tool_result` content in-place to cut tokens. 
 ## QoderCN VPC maintenance (manual)
 
 When the user explicitly requests the full QoderCN VPC update workflow, read `.agents/skills/qodercn-vpc-update/SKILL.md`. It owns upstream/CLI synchronization, release-impact assessment, live model synchronization, and low-cost verification. Do not run it for ordinary Qoder bug fixes or status checks.
+
+**Standing scope.** This checkout is maintained as a Qoder CN VPC reverse proxy.
+Only the Qoder proxy path (PAT/OAuth exchange, COSY signing, live catalog and
+slug identity, queue/retry, streaming, usage) and VPC availability are in scope.
+Do not spend effort on, report at length about, or gate completion on unrelated
+providers, features, or their unit tests: those files stay for upstream merges
+and run only via `cd tests && npm run test:all`. Default verification is
+`cd tests && npm test` (Qoder only), plus `npm run test:qoder-path` when combo or
+account fallback is touched.
