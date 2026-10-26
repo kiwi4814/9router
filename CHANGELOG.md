@@ -8,6 +8,7 @@
 
 ## Maintenance
 - **Qoder queue budget**: the default model-queue wait now matches the documented three-minute budget instead of ten, and the deployment pins `QODER_MODEL_QUEUE_MAX_WAIT_MS=180000` explicitly so a queued request cannot silently hold a client for ten minutes.
+- **Tests scope**: `npm test` now runs only the Qoder path (`unit/qoder*`, 209 tests in ~1.5s); `test:qoder-path` adds the combo / account-fallback guards that path depends on, and `test:all` keeps the full upstream suite for merges. Files are retained rather than deleted so upstream merges stay reviewable and the shared translator/chatCore coverage is not lost.
 - **Tests**: regenerate the URL/header golden snapshot for the providers this merge added and strip host/version values from it so it no longer depends on the machine running the suite; assert the current in-place Responses tool-output contract in the headroom test; isolate the strict-proxy cases from ambient `*_proxy` variables; resolve repo-relative test paths in the regression gate so its baseline can actually match.
 - Add the project-local `qodercn-vpc-update` skill for upstream/CLI updates, release-impact assessment, live VPC model synchronization, and low-cost runtime verification; keep npm recovery conditional.
 - Require rebuilding and switching the running repository service during the QoderCN VPC update workflow, with rollback and actual dashboard/version/API verification; distinguish it from updating the official npm launcher.

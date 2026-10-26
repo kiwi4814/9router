@@ -12,17 +12,21 @@ cd tests/ && npm install
 
 ## Running Tests
 
-From the `tests/` directory:
+This fork is maintained as a Qoder CN VPC reverse proxy, so the default run
+covers only the Qoder path:
 
 ```bash
-npm test
+cd tests/
+npm test               # unit/qoder*.test.js (default)
+npm run test:qoder-path # Qoder plus the combo / account-fallback guards it relies on
+npm run test:all       # every suite in the repository (upstream maintenance)
 ```
 
-Or run vitest directly with npx:
-
-```bash
-npx vitest run --reporter=verbose --config ./vitest.config.js
-```
+The remaining suites stay on disk for upstream merges; they are not deleted
+because the Qoder request path still runs through the shared translator,
+chatCore and combo code those suites cover. Run them with `npm run test:all`
+when merging upstream, and expect the failures recorded in
+`tests/__baseline__/known-fails.txt`.
 
 ## Test Files
 

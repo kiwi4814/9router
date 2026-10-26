@@ -5,8 +5,10 @@
   "type": "module",
   "description": "Unit tests for 9router embeddings endpoint",
   "scripts": {
-    "test": "vitest run --reporter=verbose",
-    "test:watch": "vitest --reporter=verbose"
+    "test": "vitest run unit/qoder --reporter=verbose",
+    "test:qoder-path": "vitest run unit/qoder unit/account-fallback unit/combo-request-scoped-fallback --reporter=verbose",
+    "test:all": "vitest run --reporter=verbose",
+    "test:watch": "vitest unit/qoder --reporter=verbose"
   },
   "devDependencies": {
     "vitest": "^4.0.0"

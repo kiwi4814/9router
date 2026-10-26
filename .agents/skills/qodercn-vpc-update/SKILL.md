@@ -110,7 +110,7 @@ qoderclicn -p --model <live-display-name> --thinking disabled \
 模型不允许禁用思考时省略该选项，使用其最低支持档位。观察实际正文，版本/help/目录成功不等于推理成功。
 
 2. **当前代码与新服务**：运行源码 executor 的短请求，记录所选 slug、实际发送的 model_config.key、HTTP 状态、完整 SSE 正文与结束标志。服务切换前可先在隔离端口验证；切换后必须在实际服务端口验收 `/v1/models`、非流式与完整流式 `/v1/chat/completions`。认证信息在进程内注入，不能出现在 argv 或日志。只测旧服务或只测源码不足以证明部署成功。
-3. 使用现有测试包运行受影响 qoder/context/meta/queue/fallback 测试；缺依赖先安装 tests 声明依赖，不把启动失败写成测试通过。测试发现回归先修复；全库既有红项使用仓库基线规则判断。
+3. 使用现有测试包验证 Qoder 路径：默认 `cd tests && npm test` 只跑 `unit/qoder*`；涉及组合回退时跑 `npm run test:qoder-path`。合并上游后跑 `npm run test:all` 并用 `tests/__baseline__/known-fails.txt` 判断既有红项，非 Qoder 失败不得当作本轮回归，也不得写成测试通过。缺依赖先安装 tests 声明依赖，不把启动失败写成测试通过。测试发现回归先修复。
 4. SSE 必须消费到终止，验证实际文本、finish/usage（上游提供时）及错误；禁止用截取前几行当通过。响应 model 为 auto 不能证明选定模型被正确计费，要以发出的 key/config 作为路由证据，账单需独立证据。
 5. 必要适配完成后更新 CHANGELOG，清理本轮临时包/快照/服务；保留可用回退备份及用户原始配置。验证通过后按授权完成合并提交。
 
