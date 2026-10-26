@@ -1,6 +1,7 @@
 // P0 GOLDEN: lock buildUrl + buildHeaders cho mọi provider trên code CŨ.
 // Sinh snapshot lần đầu (baseline) → sau refactor chạy lại phải khớp y hệt.
 // Mock proxyFetch + uuid-heavy executors KHÔNG cần ở đây vì chỉ gọi buildUrl/buildHeaders (pure).
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { PROVIDERS } from "../../open-sse/config/providers.js";
 import { DefaultExecutor } from "../../open-sse/executors/default.js";
@@ -24,7 +25,21 @@ const SPECIALIZED = new Set([
 ]);
 
 // Per-process / per-request values: kimi's random device name, minimax's session UUID.
-const VOLATILE_HEADERS = new Set(["x-msh-device-name", "x-mavis-session-id"]);
+const VOLATILE_HEADERS = new Set([
+  "x-msh-device-name",
+  "x-mavis-session-id",
+  // Host identity: they describe the machine running the test, not the wire
+  // contract, so a snapshot taken on macOS/Node 24 must not fail on Linux.
+  "x-platform",
+  "x-platform-version",
+]);
+
+// Our own product version rides in User-Agent and X-*-VERSION. Pin it out of the
+// snapshot: this golden locks URL/header shape, and a release bump should not
+// invalidate it.
+const APP_VERSION = JSON.parse(
+  readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+).version;
 
 // Sanitize header: khử token + field thời gian động (kimi X-Msh-Device-Id) để snapshot ổn định.
 function sanitize(headers) {
@@ -35,6 +50,7 @@ function sanitize(headers) {
       ? v.replace(/Bearer .+/, "Bearer <TOK>")
           .replace(/sk-test-APIKEY|tok-test-ACCESS/g, "<CRED>")
           .replace(/kimi-\d{10,}/g, "kimi-<TS>")
+          .split(APP_VERSION).join("<APP_VER>")
       : v;
   }
   return out;

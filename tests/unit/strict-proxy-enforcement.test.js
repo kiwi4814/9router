@@ -13,7 +13,7 @@
 //    attempt. When no proxy URL resolves there is nothing to try, so it
 //    reaches the trailing `return originalFetch(url, options)` and connects
 //    directly.
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/models", () => ({
   getProxyPoolById: vi.fn(),
@@ -22,6 +22,28 @@ vi.mock("@/models", () => ({
 const { getProxyPoolById } = await import("@/models");
 const { resolveConnectionProxyConfig } = await import("../../src/lib/network/connectionProxy.js");
 const { proxyAwareFetch } = await import("../../open-sse/utils/proxyFetch.js");
+
+// proxyAwareFetch honours the ambient *_proxy variables, so a developer shell
+// that exports http(s)_proxy would resolve a proxy for these fake hosts and
+// then throw through the strictProxy guard. These cases are about the guard's
+// "nothing configured" path, so the environment must not leak in.
+const PROXY_ENV_KEYS = [
+  "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+  "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+];
+const savedProxyEnv = {};
+beforeAll(() => {
+  for (const key of PROXY_ENV_KEYS) {
+    savedProxyEnv[key] = process.env[key];
+    delete process.env[key];
+  }
+});
+afterAll(() => {
+  for (const key of PROXY_ENV_KEYS) {
+    if (savedProxyEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = savedProxyEnv[key];
+  }
+});
 
 describe("strict pool keeps strictProxy when the pool is unusable (#4333)", () => {
   it("keeps strictProxy for an inactive strict pool", async () => {

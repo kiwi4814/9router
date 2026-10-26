@@ -7,6 +7,8 @@
 - **Qoder thinking**: declare Qoder's thinking wire format for both provider identities so generic translation preserves disable intent and live effort names (`max` included) instead of rewriting them into underlying Qwen/GLM parameters before the executor can validate the catalog.
 
 ## Maintenance
+- **Qoder queue budget**: the default model-queue wait now matches the documented three-minute budget instead of ten, and the deployment pins `QODER_MODEL_QUEUE_MAX_WAIT_MS=180000` explicitly so a queued request cannot silently hold a client for ten minutes.
+- **Tests**: regenerate the URL/header golden snapshot for the providers this merge added and strip host/version values from it so it no longer depends on the machine running the suite; assert the current in-place Responses tool-output contract in the headroom test; isolate the strict-proxy cases from ambient `*_proxy` variables; resolve repo-relative test paths in the regression gate so its baseline can actually match.
 - Add the project-local `qodercn-vpc-update` skill for upstream/CLI updates, release-impact assessment, live VPC model synchronization, and low-cost runtime verification; keep npm recovery conditional.
 - Require rebuilding and switching the running repository service during the QoderCN VPC update workflow, with rollback and actual dashboard/version/API verification; distinguish it from updating the official npm launcher.
 - **QoderCN CLI**: verify npm `1.1.74` compatibility with VPC routing, live model metadata, and streaming; keep COSY/signature constants unchanged. The [CN release notes](https://docs.qoder.cn/product-overview/qoder-cn-cli#cli-1-1-74) cover Sites, session/checkpoint improvements, and image-to-image generation.

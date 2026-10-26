@@ -48,15 +48,20 @@ describe("compressWithHeadroom openai-responses format (#1998)", () => {
     expect(typeof body.input[0].content).not.toBe("string");
   });
 
-  it("skips Responses tool/reasoning history instead of collapsing it into a message (#2132)", async () => {
+  it("compresses Responses tool output in place without collapsing protocol items (#2132)", async () => {
+    // The proxy only understands OpenAI messages, so a full round-trip would
+    // collapse function_call / reasoning items into a plain message. Instead
+    // only the plain-text leaf of function_call_output is compressed, and the
+    // Responses items stay native and in order (#4070, #2132).
     global.fetch = vi.fn(async () => ({
       ok: true,
       json: async () => ({
-        messages: [{ role: "user", content: "compressed tool history" }],
+        messages: [{ role: "tool", tool_call_id: "headroom-tool-0", content: "short summary" }],
         tokens_saved: 10,
       }),
     }));
 
+    const longOutput = "a long tool output line ".repeat(40).trim();
     const input = [
       {
         type: "message",
@@ -72,7 +77,7 @@ describe("compressWithHeadroom openai-responses format (#1998)", () => {
       {
         type: "function_call_output",
         call_id: "call_apply_patch_123",
-        output: "ok",
+        output: longOutput,
       },
       {
         type: "reasoning",
@@ -99,9 +104,46 @@ describe("compressWithHeadroom openai-responses format (#1998)", () => {
       diagnostics,
     });
 
+    expect(data).not.toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(payload.messages).toEqual([
+      { role: "tool", tool_call_id: "headroom-tool-0", content: longOutput },
+    ]);
+    expect(body.input.map((item) => item.type)).toEqual([
+      "message", "function_call", "function_call_output", "reasoning",
+    ]);
+    expect(body.input[1]).toEqual(input[1]);
+    expect(body.input[3]).toEqual(input[3]);
+    expect(body.input[2]).toMatchObject({ call_id: "call_apply_patch_123", output: "short summary" });
+    expect(diagnostics.after).toBeDefined();
+  });
+
+  it("skips compression when every Responses tool output is structured JSON", async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ messages: [], tokens_saved: 0 }),
+    }));
+
+    const input = [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "check" }] },
+      { type: "function_call", call_id: "call_x", name: "lookup", arguments: "{}" },
+      { type: "function_call_output", call_id: "call_x", output: '{"ok":true}' },
+    ];
+    const body = { input: structuredClone(input) };
+    const diagnostics = {};
+
+    const data = await compressWithHeadroom(body, {
+      enabled: true,
+      url: "http://headroom.test",
+      model: "gpt-5",
+      format: "openai-responses",
+      diagnostics,
+    });
+
     expect(data).toBeNull();
     expect(global.fetch).not.toHaveBeenCalled();
     expect(body.input).toEqual(input);
-    expect(diagnostics.reason).toBe("skipped: openai-responses tool/reasoning input is not safe to compress");
+    expect(diagnostics.reason).toBe("no eligible plain-text tool output");
   });
 });
