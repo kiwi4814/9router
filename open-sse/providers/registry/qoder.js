@@ -40,6 +40,8 @@ export default {
   authHint: "Personal Access Token (pt-...) từ https://qoder.com/account/integrations",
   transport: {
     baseUrl: QODER_CHAT_URL,
+    // The executor maps thinking intent using the live Qoder catalog.
+    thinkingFormat: "qoder",
     headers: {},
     timeoutMs: QODER_STREAM_TIMEOUT_MS,
     stallTimeoutMs: QODER_STALL_TIMEOUT_MS,
@@ -64,6 +66,10 @@ export default {
     { id: "dmodel", name: "DeepSeek-V4-Pro" },
     { id: "dfmodel", name: "DeepSeek-V4-Flash" },
     { id: "mmodel", name: "MiniMax-M3" },
+    // Frontier reasoning pair. Absent from many per-account catalogs, so the
+    // executor falls back to a static model_config (see constants.js).
+    { id: "smodel", name: "Sonus" },
+    { id: "cmodel", name: "Cantus" },
   ],
   oauth: {
     openApiBaseUrl: QODER_OPENAPI_BASE,

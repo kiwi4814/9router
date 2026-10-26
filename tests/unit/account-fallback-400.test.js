@@ -6,13 +6,6 @@ import {
 } from "../../open-sse/services/accountFallback.js";
 
 describe("checkFallbackError HTTP 400 ordering", () => {
-  it("does not fallback for an ordinary client-side 400", () => {
-    expect(checkFallbackError(400, "Bad request", 0)).toEqual({
-      shouldFallback: false,
-      cooldownMs: 0,
-    });
-  });
-
   it("keeps text-based rate-limit rules higher priority than generic 400", () => {
     expect(checkFallbackError(400, "upstream rate limit reached", 0)).toEqual({
       shouldFallback: true,

@@ -19,6 +19,7 @@
 import { describe, it, expect, vi } from "vitest";
 
 import { __test__ as qoderInternals } from "../../open-sse/executors/qoder.js";
+import { applyThinking } from "../../open-sse/translator/concerns/thinkingUnified.js";
 
 const { buildQoderRequestBody } = qoderInternals;
 
@@ -316,5 +317,25 @@ describe("public model ids (v1.2)", () => {
       proxyOptions: { fetch: mockFetchFor(gfmodelConfig) },
     });
     expect(result.qoderKey).toBe("gfmodel");
+  });
+});
+
+describe("translated Qoder thinking intent", () => {
+  it("keeps a public Qwen slug's disable intent through translation to the wire", async () => {
+    const config = {
+      ...disableableConfig,
+      key: "qfmodel",
+      display_name: "Qwen3.8-Flash",
+    };
+    const body = applyThinking("openai", "qwen3.8-flash", { reasoning_effort: "none" }, "qoder");
+    const { payload } = await build({ config, body });
+    expect(payload.parameters.enable_thinking).toBe(false);
+  });
+
+  it("keeps CN GLM max effort for the live catalog rather than remapping it", async () => {
+    const body = applyThinking("openai", "glm-5.3-flash", { reasoning_effort: "max" }, "qoder-cn");
+    const { payload } = await build({ body });
+    expect(payload.parameters.reasoning_effort).toBe("max");
+    expect(payload.parameters.enable_thinking).toBe(true);
   });
 });

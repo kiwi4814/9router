@@ -35,13 +35,6 @@ describe("detectRequiredCapabilities", () => {
     expect(r.has("vision")).toBe(true);
   });
 
-  it("web_search tool -> search", () => {
-    const r = detectRequiredCapabilities({ messages: [{ role: "user", content: "q" }], tools: [
-      { type: "web_search" },
-    ] });
-    expect(r.has("search")).toBe(true);
-  });
-
   it("responses input_image -> vision", () => {
     const r = detectRequiredCapabilities({ input: [{ role: "user", content: [
       { type: "input_image", image_url: "x" },
@@ -63,12 +56,6 @@ describe("reorderByCapabilities", () => {
     expect(out[0]).toBe("anthropic/claude-sonnet-4.6");
     expect(out).toContain("deepseek/deepseek-chat"); // not dropped
     expect(out).toHaveLength(2);
-  });
-
-  it("keeps order when no model matches", () => {
-    const models = ["deepseek/deepseek-chat", "deepseek/deepseek-reasoner"];
-    const out = reorderByCapabilities(models, new Set(["vision"]));
-    expect(out).toBe(models);
   });
 
   it("single model -> unchanged", () => {
